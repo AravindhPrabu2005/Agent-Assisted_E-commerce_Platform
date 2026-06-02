@@ -5,6 +5,7 @@ import LoginPage from './components/Loginpage';
 import Indexpage from './components/Indexpage';
 import Adminpage from './components/Adminpage';
 import AdminSignupPage from './components/AdminSignup';
+import Landing from './components/Landing';
 
 const App = () => {
     const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
@@ -13,11 +14,16 @@ const App = () => {
     return (
         <Router>
             <Routes>
+                <Route path="/" element={<Landing />} />
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/signup" element={<SignupPage />} />
                 <Route path="/adminSignup" element={<AdminSignupPage />} />
-                <Route path="/" element={isLoggedIn && !isAdmin ? <Indexpage /> : <Navigate to="/login" />} />
-                <Route path="/admin" element={isLoggedIn && isAdmin ? <Adminpage /> : <Navigate to="/login" />} />
+
+
+                <Route path="/user/home" element={<Indexpage />} />
+
+
+                <Route path="/admin/home" element={<Adminpage />} />
             </Routes>
         </Router>
     );
