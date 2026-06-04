@@ -35,7 +35,7 @@ export default function LoginPage() {
         localStorage.setItem("userName", response.data.user.name);
 
         if (response.data.user.role === "admin") {
-          navigate("/admin/home");
+          navigate("/admin/dashboard");
         } else {
           navigate("/user/home");
         }
