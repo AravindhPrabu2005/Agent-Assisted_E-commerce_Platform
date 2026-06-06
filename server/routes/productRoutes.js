@@ -429,4 +429,14 @@ router.delete("/products/:id", async (req, res) => {
   }
 });
 
+router.get("/admin/products/:adminId", async (req, res) => {
+  try {
+    const { adminId } = req.params;
+    const products = await Product.find({ adminId }).sort({ createdAt: -1 });
+    res.json({ products });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch admin products." });
+  }
+});
+
 module.exports = router;

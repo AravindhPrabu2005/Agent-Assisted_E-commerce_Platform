@@ -3,24 +3,49 @@ import { useNavigate, useParams } from "react-router-dom";
 import UserNavbar from "./UserNavbar";
 import axiosInstance from "../../axiosInstance";
 
+const StarDisplay = ({ rating, size = "text-sm" }) => {
+  return (
+    <div
+      className={`flex items-center gap-0.5 ${size}`}
+      aria-label={`${rating} out of 5 stars`}
+    >
+      {[1, 2, 3, 4, 5].map((star) => (
+        <span
+          key={star}
+          className={star <= rating ? "text-amber-400" : "text-slate-200"}
+        >
+          ★
+        </span>
+      ))}
+    </div>
+  );
+};
+
 const Product = () => {
   const navigate = useNavigate();
   const { id } = useParams();
+  const userId = localStorage.getItem("userId");
 
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedImage, setSelectedImage] = useState("");
 
+  const [reviews, setReviews] = useState([]);
+  const [reviewsLoading, setReviewsLoading] = useState(true);
+
+  const [cartLoading, setCartLoading] = useState(false);
+  const [wishlistLoading, setWishlistLoading] = useState(false);
+  const [isInCart, setIsInCart] = useState(false);
+  const [isInWishlist, setIsInWishlist] = useState(false);
+
   useEffect(() => {
     const fetchProduct = async () => {
       try {
         setLoading(true);
         setError("");
-
         const res = await axiosInstance.get(`/products/${id}`);
         const productData = res.data?.product || res.data;
-
         setProduct(productData);
         setSelectedImage(
           productData?.imageUrl ||
@@ -33,37 +58,50 @@ const Product = () => {
       }
     };
 
-    if (id) {
-      fetchProduct();
-    }
+    if (id) fetchProduct();
   }, [id]);
 
-  const testimonials = [
-    {
-      id: 1,
-      name: "Rahul K",
-      role: "Verified Buyer",
-      rating: 5,
-      comment:
-        "Excellent product quality and the delivery was smooth. The product matched the description exactly.",
-    },
-    {
-      id: 2,
-      name: "Sneha M",
-      role: "Verified Buyer",
-      rating: 4,
-      comment:
-        "Very happy with the purchase. Packaging was neat, and the product feels premium for the price.",
-    },
-    {
-      id: 3,
-      name: "Arjun S",
-      role: "Verified Buyer",
-      rating: 5,
-      comment:
-        "The ordering experience was simple and the product works perfectly. Would definitely recommend it.",
-    },
-  ];
+  useEffect(() => {
+    const fetchReviews = async () => {
+      try {
+        setReviewsLoading(true);
+        const res = await axiosInstance.get(`/reviews/product/${id}`);
+        const fetched = Array.isArray(res.data?.reviews) ? res.data.reviews : [];
+        setReviews(fetched);
+      } catch {
+        setReviews([]);
+      } finally {
+        setReviewsLoading(false);
+      }
+    };
+
+    if (id) fetchReviews();
+  }, [id]);
+
+  useEffect(() => {
+    const fetchSavedStatus = async () => {
+      if (!userId || !id) return;
+
+      try {
+        const [cartRes, wishlistRes] = await Promise.all([
+          axiosInstance.get("/cart/check", {
+            params: { userId, productId: id },
+          }),
+          axiosInstance.get("/wishlist/check", {
+            params: { userId, productId: id },
+          }),
+        ]);
+
+        setIsInCart(!!cartRes.data?.exists);
+        setIsInWishlist(!!wishlistRes.data?.exists);
+      } catch {
+        setIsInCart(false);
+        setIsInWishlist(false);
+      }
+    };
+
+    fetchSavedStatus();
+  }, [id, userId]);
 
   const formatPrice = (value) => {
     if (value === undefined || value === null) return "₹0";
@@ -72,6 +110,15 @@ const Product = () => {
       currency: "INR",
       maximumFractionDigits: 0,
     }).format(value);
+  };
+
+  const formatDate = (value) => {
+    if (!value) return "";
+    return new Date(value).toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
   };
 
   const discountPercent = useMemo(() => {
@@ -84,58 +131,76 @@ const Product = () => {
 
   const productImages = useMemo(() => {
     if (!product) return [];
-    return [
+    const img =
       product.imageUrl ||
-        "https://dummyimage.com/800x800/e5e7eb/111827&text=No+Image",
-      product.imageUrl ||
-        "https://dummyimage.com/800x800/e5e7eb/111827&text=No+Image",
-      product.imageUrl ||
-        "https://dummyimage.com/800x800/e5e7eb/111827&text=No+Image",
-    ];
+      "https://dummyimage.com/800x800/e5e7eb/111827&text=No+Image";
+    return [img, img, img];
   }, [product]);
 
+  const ratingBreakdown = useMemo(() => {
+    if (!reviews.length) return [];
+    return [5, 4, 3, 2, 1].map((star) => {
+      const count = reviews.filter((r) => r.rating === star).length;
+      const percent = Math.round((count / reviews.length) * 100);
+      return { star, count, percent };
+    });
+  }, [reviews]);
+
+  const computedAverage = useMemo(() => {
+    if (!reviews.length) return 0;
+    const sum = reviews.reduce((acc, r) => acc + r.rating, 0);
+    return (sum / reviews.length).toFixed(1);
+  }, [reviews]);
+
   const handleOrderNow = () => {
-    navigate("/order", { state: { product } });
+    navigate(`/user/order/${product._id}`, { state: { product } });
   };
 
-  const handleAddToCart = () => {
-    const existingCart = JSON.parse(localStorage.getItem("cartItems") || "[]");
-
-    const alreadyExists = existingCart.find((item) => item._id === product._id);
-
-    let updatedCart;
-    if (alreadyExists) {
-      updatedCart = existingCart;
-    } else {
-      updatedCart = [...existingCart, { ...product, quantity: 1 }];
+  const handleAddToCart = async () => {
+    if (!userId) {
+      alert("Please login first.");
+      return;
     }
 
-    localStorage.setItem("cartItems", JSON.stringify(updatedCart));
-    localStorage.setItem("cartCount", updatedCart.length.toString());
-    window.dispatchEvent(new Event("storage"));
-    alert("Product added to cart");
+    try {
+      setCartLoading(true);
+
+      await axiosInstance.post("/cart", {
+        userId,
+        productId: product._id,
+        quantity: 1,
+      });
+
+      setIsInCart(true);
+      alert("Product added to cart");
+    } catch (err) {
+      alert(err.response?.data?.message || "Failed to add to cart.");
+    } finally {
+      setCartLoading(false);
+    }
   };
 
-  const handleAddToWishlist = () => {
-    const existingWishlist = JSON.parse(
-      localStorage.getItem("wishlistItems") || "[]"
-    );
-
-    const alreadyExists = existingWishlist.find(
-      (item) => item._id === product._id
-    );
-
-    let updatedWishlist;
-    if (alreadyExists) {
-      updatedWishlist = existingWishlist;
-    } else {
-      updatedWishlist = [...existingWishlist, product];
+  const handleAddToWishlist = async () => {
+    if (!userId) {
+      alert("Please login first.");
+      return;
     }
 
-    localStorage.setItem("wishlistItems", JSON.stringify(updatedWishlist));
-    localStorage.setItem("wishlistCount", updatedWishlist.length.toString());
-    window.dispatchEvent(new Event("storage"));
-    alert("Product added to wishlist");
+    try {
+      setWishlistLoading(true);
+
+      await axiosInstance.post("/wishlist", {
+        userId,
+        productId: product._id,
+      });
+
+      setIsInWishlist(true);
+      alert("Product added to wishlist");
+    } catch (err) {
+      alert(err.response?.data?.message || "Failed to add to wishlist.");
+    } finally {
+      setWishlistLoading(false);
+    }
   };
 
   if (loading) {
@@ -242,11 +307,17 @@ const Product = () => {
 
               <div className="mt-4 flex flex-wrap items-center gap-4">
                 <div className="flex items-center gap-2">
-                  <span className="text-base font-bold text-amber-500">
-                    ★ {product.ratingAverage || 0}
+                  <StarDisplay
+                    rating={Math.round(
+                      Number(computedAverage || product.ratingAverage || 0)
+                    )}
+                    size="text-base"
+                  />
+                  <span className="text-sm font-bold text-amber-500">
+                    {computedAverage || product.ratingAverage || 0}
                   </span>
                   <span className="text-sm text-slate-400">
-                    ({product.ratingCount || 0} reviews)
+                    ({reviews.length || product.ratingCount || 0} reviews)
                   </span>
                 </div>
 
@@ -297,16 +368,26 @@ const Product = () => {
 
                 <button
                   onClick={handleAddToCart}
-                  className="rounded-2xl bg-orange-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-orange-600"
+                  disabled={cartLoading || isInCart}
+                  className="rounded-2xl bg-orange-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Add to Cart
+                  {cartLoading
+                    ? "Adding..."
+                    : isInCart
+                    ? "Added to Cart"
+                    : "Add to Cart"}
                 </button>
 
                 <button
                   onClick={handleAddToWishlist}
-                  className="rounded-2xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-orange-400 hover:text-orange-500"
+                  disabled={wishlistLoading || isInWishlist}
+                  className="rounded-2xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-orange-400 hover:text-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Wishlist
+                  {wishlistLoading
+                    ? "Saving..."
+                    : isInWishlist
+                    ? "Wishlisted"
+                    : "Wishlist"}
                 </button>
               </div>
             </div>
@@ -368,41 +449,114 @@ const Product = () => {
 
         <section className="mx-auto mt-10 max-w-7xl">
           <div className="rounded-[32px] bg-white p-8 shadow-sm">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h2 className="text-2xl font-black text-[#0e3558]">
-                  What customers say
-                </h2>
-                <p className="mt-2 text-sm text-slate-500">
-                  Static testimonials for now. We can connect real reviews later.
+            <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:gap-10">
+              <div className="flex shrink-0 flex-col items-center justify-center rounded-[28px] bg-[#f7f8fa] p-8 text-center sm:min-w-[200px]">
+                <p className="text-6xl font-black text-[#0e3558]">
+                  {computedAverage || "0.0"}
                 </p>
+                <StarDisplay
+                  rating={Math.round(Number(computedAverage))}
+                  size="text-2xl"
+                />
+                <p className="mt-2 text-sm text-slate-500">
+                  {reviews.length} review{reviews.length !== 1 ? "s" : ""}
+                </p>
+              </div>
+
+              <div className="flex flex-1 flex-col justify-center gap-3">
+                <h2 className="text-2xl font-black text-[#0e3558]">
+                  Customer Reviews
+                </h2>
+
+                {ratingBreakdown.length > 0 ? (
+                  ratingBreakdown.map(({ star, count, percent }) => (
+                    <div key={star} className="flex items-center gap-3">
+                      <span className="w-12 shrink-0 text-right text-xs font-semibold text-slate-500">
+                        {star} ★
+                      </span>
+                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200">
+                        <div
+                          className="h-full rounded-full bg-amber-400 transition-all duration-500"
+                          style={{ width: `${percent}%` }}
+                        />
+                      </div>
+                      <span className="w-8 shrink-0 text-xs font-semibold text-slate-500">
+                        {count}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-slate-500">
+                    No ratings to break down yet.
+                  </p>
+                )}
               </div>
             </div>
 
-            <div className="mt-8 grid gap-6 md:grid-cols-3">
-              {testimonials.map((item) => (
-                <div
-                  key={item.id}
-                  className="rounded-[28px] border border-slate-200 bg-[#fafafa] p-6"
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-lg font-bold text-[#0e3558]">
-                        {item.name}
-                      </h3>
-                      <p className="text-sm text-slate-400">{item.role}</p>
+            <div className="mt-8">
+              {reviewsLoading ? (
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <div
+                      key={index}
+                      className="rounded-[24px] border border-slate-100 bg-[#fafafa] p-5"
+                    >
+                      <div className="h-4 w-28 animate-pulse rounded bg-slate-200"></div>
+                      <div className="mt-3 h-3 w-20 animate-pulse rounded bg-slate-200"></div>
+                      <div className="mt-4 h-16 animate-pulse rounded bg-slate-200"></div>
                     </div>
-
-                    <span className="text-sm font-bold text-amber-500">
-                      {"★".repeat(item.rating)}
-                    </span>
-                  </div>
-
-                  <p className="mt-4 text-sm leading-7 text-slate-600">
-                    {item.comment}
+                  ))}
+                </div>
+              ) : reviews.length === 0 ? (
+                <div className="rounded-[24px] bg-[#f7f8fa] px-6 py-10 text-center">
+                  <p className="text-2xl">💬</p>
+                  <h3 className="mt-3 text-base font-black text-[#0e3558]">
+                    No reviews yet
+                  </h3>
+                  <p className="mt-2 text-sm text-slate-500">
+                    Be the first to review this product after purchase.
                   </p>
                 </div>
-              ))}
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {reviews.map((review) => (
+                    <div
+                      key={review._id}
+                      className="flex flex-col gap-3 rounded-[24px] border border-slate-100 bg-[#fafafa] p-5"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#0e3558] text-sm font-black text-white">
+                          {review.customerName?.charAt(0)?.toUpperCase() || "?"}
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-bold text-[#0e3558]">
+                            {review.customerName}
+                          </p>
+                          <p className="text-xs text-slate-400">
+                            {formatDate(review.createdAt)}
+                          </p>
+                        </div>
+
+                        <StarDisplay rating={review.rating} size="text-sm" />
+                      </div>
+
+                      <p className="text-sm leading-7 text-slate-600">
+                        {review.reviewText}
+                      </p>
+
+                      <div className="mt-auto flex items-center gap-2">
+                        <span className="rounded-full bg-[#eaf2f9] px-2.5 py-1 text-[11px] font-semibold text-[#0e3558]">
+                          Verified Buyer
+                        </span>
+                        <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-600">
+                          {review.rating}/5
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </section>

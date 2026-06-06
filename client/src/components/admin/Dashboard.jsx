@@ -3,15 +3,37 @@ import axiosInstance from "../../axiosInstance";
 import AdminNavbar from "./AdminNavbar";
 
 const Dashboard = () => {
+  const adminId =
+    localStorage.getItem("userId") || localStorage.getItem("adminId") || "";
+
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const fetchProducts = async () => {
     try {
-      const response = await axiosInstance.get("/products");
-      setProducts(response.data || []);
+      setLoading(true);
+      setError("");
+
+      if (!adminId) {
+        setProducts([]);
+        setError("Admin ID not found. Please login again.");
+        return;
+      }
+
+      const response = await axiosInstance.get(`/admin/products/${adminId}`);
+
+      const productData = Array.isArray(response.data)
+        ? response.data
+        : Array.isArray(response.data?.products)
+        ? response.data.products
+        : [];
+
+      setProducts(productData);
     } catch (error) {
       console.error("Dashboard fetch error:", error);
+      setProducts([]);
+      setError(error.response?.data?.error || "Failed to load dashboard data.");
     } finally {
       setLoading(false);
     }
@@ -19,27 +41,46 @@ const Dashboard = () => {
 
   useEffect(() => {
     fetchProducts();
-  }, []);
+  }, [adminId]);
+
+  const formatCurrency = (value) => {
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      maximumFractionDigits: 0,
+    }).format(Number(value || 0));
+  };
 
   const stats = useMemo(() => {
     const totalProducts = products.length;
     const featuredProducts = products.filter((p) => p.isFeatured).length;
     const outOfStock = products.filter(
-      (p) => Number(p.availabilityCount) === 0
+      (p) => Number(p.availabilityCount || 0) === 0
     ).length;
     const lowStock = products.filter(
       (p) =>
-        Number(p.availabilityCount) > 0 &&
-        Number(p.availabilityCount) <= Number(p.minimumThresholdCount)
+        Number(p.availabilityCount || 0) > 0 &&
+        Number(p.availabilityCount || 0) <= Number(p.minimumThresholdCount || 0)
     ).length;
     const totalInventoryUnits = products.reduce(
       (sum, p) => sum + Number(p.availabilityCount || 0),
       0
     );
     const totalInventoryValue = products.reduce(
-      (sum, p) => sum + Number(p.price || 0) * Number(p.availabilityCount || 0),
+      (sum, p) =>
+        sum +
+        Number(p.discountPrice > 0 ? p.discountPrice : p.price || 0) *
+          Number(p.availabilityCount || 0),
       0
     );
+
+    const publishedProducts = products.filter(
+      (p) => (p.status || "").toLowerCase() === "published"
+    ).length;
+
+    const draftProducts = products.filter(
+      (p) => (p.status || "").toLowerCase() === "draft"
+    ).length;
 
     return {
       totalProducts,
@@ -48,20 +89,27 @@ const Dashboard = () => {
       lowStock,
       totalInventoryUnits,
       totalInventoryValue,
+      publishedProducts,
+      draftProducts,
     };
   }, [products]);
 
   const lowStockProducts = useMemo(() => {
-    return products
+    return [...products]
       .filter(
         (p) =>
-          Number(p.availabilityCount) <= Number(p.minimumThresholdCount)
+          Number(p.availabilityCount || 0) <= Number(p.minimumThresholdCount || 0)
+      )
+      .sort(
+        (a, b) => Number(a.availabilityCount || 0) - Number(b.availabilityCount || 0)
       )
       .slice(0, 5);
   }, [products]);
 
   const recentProducts = useMemo(() => {
-    return [...products].slice(0, 5);
+    return [...products]
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+      .slice(0, 5);
   }, [products]);
 
   return (
@@ -70,22 +118,35 @@ const Dashboard = () => {
 
       <div className="min-h-screen bg-[#f5f5f5] px-4 py-8 md:px-8">
         <div className="mx-auto max-w-7xl">
-          <div className="mb-8">
-            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-orange-500">
-              Dashboard
-            </p>
-            <h1 className="mt-2 text-4xl font-extrabold text-[#0e3558]">
-              Store Overview
-            </h1>
-            <p className="mt-3 max-w-2xl text-slate-500">
-              Track inventory health, product counts, and quick operational insights
-              from one place.
-            </p>
+          <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.22em] text-orange-500">
+                Dashboard
+              </p>
+              <h1 className="mt-2 text-4xl font-extrabold text-[#0e3558]">
+                My Store Overview
+              </h1>
+              <p className="mt-3 max-w-2xl text-slate-500">
+                Track inventory health, product counts, and operational insights for
+                your own catalog.
+              </p>
+            </div>
+
+            <button
+              onClick={fetchProducts}
+              className="rounded-2xl bg-[#0e3558] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#164a79]"
+            >
+              Refresh Dashboard
+            </button>
           </div>
 
           {loading ? (
             <div className="rounded-[28px] border border-white/70 bg-white/70 p-8 shadow-2xl shadow-slate-300/20 backdrop-blur-sm">
               <p className="text-slate-500">Loading dashboard...</p>
+            </div>
+          ) : error ? (
+            <div className="rounded-[28px] border border-red-200 bg-red-50 p-8 shadow-2xl shadow-red-100/50">
+              <p className="font-semibold text-red-600">{error}</p>
             </div>
           ) : (
             <>
@@ -110,7 +171,7 @@ const Dashboard = () => {
                     {stats.totalInventoryUnits}
                   </h2>
                   <p className="mt-2 text-sm text-slate-500">
-                    Total available stock across all products.
+                    Total available stock across your products.
                   </p>
                 </div>
 
@@ -122,7 +183,7 @@ const Dashboard = () => {
                     {stats.lowStock}
                   </h2>
                   <p className="mt-2 text-sm text-slate-500">
-                    Products at or below their threshold count.
+                    Products at or below threshold count.
                   </p>
                 </div>
 
@@ -134,7 +195,7 @@ const Dashboard = () => {
                     {stats.outOfStock}
                   </h2>
                   <p className="mt-2 text-sm text-slate-500">
-                    Products currently unavailable for sale.
+                    Products unavailable for sale right now.
                   </p>
                 </div>
               </div>
@@ -152,7 +213,7 @@ const Dashboard = () => {
                     </div>
                   </div>
 
-                  <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-4">
                     <div className="rounded-2xl bg-slate-50 p-5">
                       <p className="text-sm text-slate-500">Featured Products</p>
                       <h3 className="mt-2 text-3xl font-extrabold text-[#0e3558]">
@@ -163,25 +224,42 @@ const Dashboard = () => {
                     <div className="rounded-2xl bg-slate-50 p-5">
                       <p className="text-sm text-slate-500">Inventory Value</p>
                       <h3 className="mt-2 text-3xl font-extrabold text-[#0e3558]">
-                        ₹{stats.totalInventoryValue.toLocaleString("en-IN")}
+                        {formatCurrency(stats.totalInventoryValue)}
                       </h3>
                     </div>
 
                     <div className="rounded-2xl bg-slate-50 p-5">
-                      <p className="text-sm text-slate-500">Catalog Health</p>
-                      <h3 className="mt-2 text-3xl font-extrabold text-[#0e3558]">
-                        {stats.totalProducts === 0
-                          ? "0%"
-                          : `${Math.max(
-                              0,
-                              Math.round(
-                                ((stats.totalProducts - stats.outOfStock) /
-                                  stats.totalProducts) *
-                                  100
-                              )
-                            )}%`}
+                      <p className="text-sm text-slate-500">Published</p>
+                      <h3 className="mt-2 text-3xl font-extrabold text-green-600">
+                        {stats.publishedProducts}
                       </h3>
                     </div>
+
+                    <div className="rounded-2xl bg-slate-50 p-5">
+                      <p className="text-sm text-slate-500">Drafts</p>
+                      <h3 className="mt-2 text-3xl font-extrabold text-amber-500">
+                        {stats.draftProducts}
+                      </h3>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 rounded-2xl bg-slate-50 p-5">
+                    <p className="text-sm text-slate-500">Catalog Health</p>
+                    <h3 className="mt-2 text-3xl font-extrabold text-[#0e3558]">
+                      {stats.totalProducts === 0
+                        ? "0%"
+                        : `${Math.max(
+                            0,
+                            Math.round(
+                              ((stats.totalProducts - stats.outOfStock) /
+                                stats.totalProducts) *
+                                100
+                            )
+                          )}%`}
+                    </h3>
+                    <p className="mt-2 text-sm text-slate-500">
+                      Percentage of your catalog that is still available for selling.
+                    </p>
                   </div>
                 </div>
 
@@ -212,7 +290,7 @@ const Dashboard = () => {
                       href="/admin/products"
                       className="block rounded-2xl border border-slate-300 px-5 py-3 text-center font-semibold text-[#0e3558] transition hover:border-orange-400 hover:text-orange-500"
                     >
-                      View Products
+                      View My Products
                     </a>
                   </div>
                 </div>
@@ -238,7 +316,10 @@ const Dashboard = () => {
                         >
                           <div className="flex items-center gap-3">
                             <img
-                              src={product.imageUrl}
+                              src={
+                                product.imageUrl ||
+                                "https://dummyimage.com/100x100/e5e7eb/111827&text=No+Image"
+                              }
                               alt={product.name}
                               className="h-14 w-14 rounded-xl object-cover"
                             />
@@ -247,19 +328,19 @@ const Dashboard = () => {
                                 {product.name}
                               </p>
                               <p className="text-sm text-slate-500">
-                                {product.category}
+                                {product.category || "No category"}
                               </p>
                             </div>
                           </div>
 
                           <div className="text-right">
                             <p className="text-sm font-semibold text-orange-600">
-                              {Number(product.availabilityCount) === 0
+                              {Number(product.availabilityCount || 0) === 0
                                 ? "Out of stock"
                                 : "Low stock"}
                             </p>
                             <p className="text-sm text-slate-500">
-                              {product.availabilityCount} left
+                              {product.availabilityCount || 0} left
                             </p>
                           </div>
                         </div>
@@ -287,7 +368,10 @@ const Dashboard = () => {
                         >
                           <div className="flex items-center gap-3">
                             <img
-                              src={product.imageUrl}
+                              src={
+                                product.imageUrl ||
+                                "https://dummyimage.com/100x100/e5e7eb/111827&text=No+Image"
+                              }
                               alt={product.name}
                               className="h-14 w-14 rounded-xl object-cover"
                             />
@@ -303,10 +387,14 @@ const Dashboard = () => {
 
                           <div className="text-right">
                             <p className="font-semibold text-[#0e3558]">
-                              ₹{product.price}
+                              {formatCurrency(
+                                product.discountPrice > 0
+                                  ? product.discountPrice
+                                  : product.price
+                              )}
                             </p>
-                            <p className="text-sm text-slate-500">
-                              {product.status}
+                            <p className="text-sm capitalize text-slate-500">
+                              {product.status || "draft"}
                             </p>
                           </div>
                         </div>

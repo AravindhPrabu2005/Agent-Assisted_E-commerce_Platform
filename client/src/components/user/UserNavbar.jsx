@@ -1,20 +1,68 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Bot } from "lucide-react";
+import axiosInstance from "../../axiosInstance";
 
 export default function UserNavbar() {
   const location = useLocation();
   const navigate = useNavigate();
-  const [search, setSearch] = useState("");
 
-  const navItems = [
-    { name: "Home", path: "/" },
-    { name: "Orders", path: "/orders" },
-  ];
+  const [search, setSearch] = useState("");
+  const [wishlistCount, setWishlistCount] = useState(0);
+  const [cartCount, setCartCount] = useState(0);
 
   const userName = localStorage.getItem("userName") || "User";
-  const wishlistCount = Number(localStorage.getItem("wishlistCount") || 0);
-  const cartCount = Number(localStorage.getItem("cartCount") || 0);
+  const userId = localStorage.getItem("userId");
+
+  const navItems = [
+    { name: "Home", path: "/user/home" },
+    { name: "Orders", path: "/user/orders" },
+  ];
+
+  const badgeClass =
+    "absolute -right-1.5 -top-1.5 flex h-5 min-w-[20px] items-center justify-center rounded-full border border-white bg-orange-500 px-1 text-[10px] font-bold text-white shadow-[0_4px_10px_rgba(249,115,22,0.28)]";
+
+  const mobileBadgeClass =
+    "ml-2 inline-flex min-w-[20px] items-center justify-center rounded-full bg-orange-500 px-1.5 py-0.5 text-[10px] font-bold text-white";
+
+  const fetchNavbarCounts = async () => {
+    if (!userId) {
+      setWishlistCount(0);
+      setCartCount(0);
+      return;
+    }
+
+    try {
+      const [wishlistRes, cartRes] = await Promise.all([
+        axiosInstance.get("/wishlist", {
+          params: { userId },
+        }),
+        axiosInstance.get("/cart", {
+          params: { userId },
+        }),
+      ]);
+
+      const wishlistItems = Array.isArray(wishlistRes.data?.items)
+        ? wishlistRes.data.items
+        : [];
+
+      const cartItems = Array.isArray(cartRes.data?.items)
+        ? cartRes.data.items
+        : [];
+
+      setWishlistCount(wishlistItems.length);
+      setCartCount(
+        cartItems.reduce((sum, item) => sum + (item.quantity || 1), 0)
+      );
+    } catch (error) {
+      setWishlistCount(0);
+      setCartCount(0);
+    }
+  };
+
+  useEffect(() => {
+    fetchNavbarCounts();
+  }, [location.pathname]);
 
   const handleLogout = () => {
     localStorage.clear();
@@ -41,6 +89,7 @@ export default function UserNavbar() {
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-orange-300 to-orange-500 text-lg font-extrabold text-white shadow-md shadow-orange-200">
                 eK
               </div>
+
               <div>
                 <h1 className="text-3xl font-extrabold tracking-tight text-black">
                   eKadai
@@ -54,6 +103,7 @@ export default function UserNavbar() {
             <nav className="hidden items-center gap-8 xl:flex">
               {navItems.map((item) => {
                 const isActive = location.pathname === item.path;
+
                 return (
                   <Link
                     key={item.name}
@@ -117,8 +167,8 @@ export default function UserNavbar() {
             </button>
 
             <Link
-              to="/wishlist"
-              className="relative flex h-11 w-11 items-center justify-center rounded-full border border-orange-200 bg-white text-orange-500 shadow-sm transition hover:border-orange-400"
+              to="/user/wishlist"
+              className="relative flex h-11 w-11 items-center justify-center rounded-full border border-orange-200 bg-white text-orange-500 shadow-sm transition hover:border-orange-400 hover:bg-orange-50"
             >
               <svg
                 className="h-5 w-5"
@@ -129,16 +179,17 @@ export default function UserNavbar() {
               >
                 <path d="M12 21s-6.716-4.35-9.192-8.192C.966 9.983 2.13 5.944 5.7 4.518c2.153-.86 4.405-.21 5.8 1.56 1.395-1.77 3.647-2.42 5.8-1.56 3.57 1.426 4.734 5.465 2.892 8.29C18.716 16.65 12 21 12 21z" />
               </svg>
+
               {wishlistCount > 0 && (
-                <span className="absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-orange-500 px-1 text-[10px] font-bold text-white">
-                  {wishlistCount}
+                <span className={badgeClass}>
+                  {wishlistCount > 99 ? "99+" : wishlistCount}
                 </span>
               )}
             </Link>
 
             <Link
-              to="/cart"
-              className="relative flex h-11 w-11 items-center justify-center rounded-full border border-orange-200 bg-white text-orange-500 shadow-sm transition hover:border-orange-400"
+              to="/user/cart"
+              className="relative flex h-11 w-11 items-center justify-center rounded-full border border-orange-200 bg-white text-orange-500 shadow-sm transition hover:border-orange-400 hover:bg-orange-50"
             >
               <svg
                 className="h-5 w-5"
@@ -151,9 +202,10 @@ export default function UserNavbar() {
                 <circle cx="18" cy="20" r="1" />
                 <path d="M3 4h2l2.4 10.2a1 1 0 0 0 .98.8H18a1 1 0 0 0 .96-.73L21 7H6" />
               </svg>
+
               {cartCount > 0 && (
-                <span className="absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-orange-500 px-1 text-[10px] font-bold text-white">
-                  {cartCount}
+                <span className={badgeClass}>
+                  {cartCount > 99 ? "99+" : cartCount}
                 </span>
               )}
             </Link>
@@ -219,6 +271,7 @@ export default function UserNavbar() {
             { name: "Cart", path: "/user/cart" },
           ].map((item) => {
             const isActive = location.pathname === item.path;
+
             return (
               <Link
                 key={item.name}
@@ -230,6 +283,18 @@ export default function UserNavbar() {
                 }`}
               >
                 {item.name}
+
+                {item.name === "Wishlist" && wishlistCount > 0 && (
+                  <span className={mobileBadgeClass}>
+                    {wishlistCount > 99 ? "99+" : wishlistCount}
+                  </span>
+                )}
+
+                {item.name === "Cart" && cartCount > 0 && (
+                  <span className={mobileBadgeClass}>
+                    {cartCount > 99 ? "99+" : cartCount}
+                  </span>
+                )}
               </Link>
             );
           })}

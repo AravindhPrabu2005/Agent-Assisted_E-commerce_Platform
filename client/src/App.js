@@ -13,6 +13,11 @@ import Home from "./components/user/Home";
 import Product from "./components/user/Product";
 import ChatBot from "./components/user/ChatBot";
 import Products from "./components/admin/Products";
+import Order from "./components/user/Order";
+import OrdersListing from "./components/user/OrdersListing";
+import Cart from "./components/user/Cart";
+import Wishlist from "./components/user/Wishlist";
+import CartCheckout from "./components/user/CartCheckout";
 
 const App = () => {
   return (
@@ -26,6 +31,11 @@ const App = () => {
         <Route path="/user/home" element={<Home />} />
         <Route path="/user/product/:id" element={<Product />} />
         <Route path='/user/product-finder' element={<ChatBot /> } />
+        <Route path="/user/order/:id" element={<Order />} />
+        <Route path="/user/orders" element={<OrdersListing />} />
+        <Route path="/user/cart" element={<Cart />} />
+        <Route path="/user/wishlist" element={<Wishlist />} />
+        <Route path="/user/cart-checkout" element={<CartCheckout />} />
 
         <Route path="/admin/dashboard" element={<Dashboard />} />
         <Route path="/admin/products" element={<Products /> } />

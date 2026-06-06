@@ -7,25 +7,41 @@ const Analytics = () => {
     localStorage.getItem("userId") || localStorage.getItem("adminId") || "";
 
   const [products, setProducts] = useState([]);
+  const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const fetchProducts = async () => {
+  const fetchAnalyticsData = async () => {
     try {
       setLoading(true);
       setError("");
 
-      const response = adminId
-        ? await axiosInstance.get(`/admin/products/${adminId}`)
-        : await axiosInstance.get("/products");
+      if (!adminId) {
+        setProducts([]);
+        setOrders([]);
+        setError("Admin ID not found. Please login again.");
+        return;
+      }
 
-      const productData = Array.isArray(response.data)
-        ? response.data
-        : Array.isArray(response.data?.products)
-        ? response.data.products
+      const [productsRes, ordersRes] = await Promise.all([
+        axiosInstance.get(`/admin/products/${adminId}`),
+        axiosInstance.get(`/admin/orders/${adminId}`),
+      ]);
+
+      const productData = Array.isArray(productsRes.data)
+        ? productsRes.data
+        : Array.isArray(productsRes.data?.products)
+        ? productsRes.data.products
+        : [];
+
+      const orderData = Array.isArray(ordersRes.data)
+        ? ordersRes.data
+        : Array.isArray(ordersRes.data?.orders)
+        ? ordersRes.data.orders
         : [];
 
       setProducts(productData);
+      setOrders(orderData);
     } catch (err) {
       console.error("Analytics fetch error:", err);
       setError(err.response?.data?.error || "Failed to load analytics.");
@@ -35,7 +51,7 @@ const Analytics = () => {
   };
 
   useEffect(() => {
-    fetchProducts();
+    fetchAnalyticsData();
   }, [adminId]);
 
   const formatCurrency = (value) => {
@@ -44,6 +60,15 @@ const Analytics = () => {
       currency: "INR",
       maximumFractionDigits: 0,
     }).format(Number(value || 0));
+  };
+
+  const formatDate = (value) => {
+    if (!value) return "-";
+    return new Date(value).toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
   };
 
   const analytics = useMemo(() => {
@@ -59,7 +84,6 @@ const Analytics = () => {
     ).length;
 
     const featuredProducts = products.filter((p) => Boolean(p.isFeatured)).length;
-    const nonFeaturedProducts = totalProducts - featuredProducts;
 
     const totalStockUnits = products.reduce(
       (sum, p) => sum + Number(p.availabilityCount || 0),
@@ -168,8 +192,117 @@ const Analytics = () => {
 
     const recentTrend = [...products]
       .slice()
-      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+      .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0))
       .slice(-7);
+
+    const totalOrders = orders.length;
+    const grossRevenue = orders.reduce(
+      (sum, order) => sum + Number(order?.pricing?.totalAmount || 0),
+      0
+    );
+    const subtotalRevenue = orders.reduce(
+      (sum, order) => sum + Number(order?.pricing?.subtotal || 0),
+      0
+    );
+    const gstCollected = orders.reduce(
+      (sum, order) => sum + Number(order?.pricing?.gstAmount || 0),
+      0
+    );
+    const avgOrderValue =
+      totalOrders === 0 ? 0 : Math.round(grossRevenue / totalOrders);
+
+    const placedOrders = orders.filter(
+      (o) => (o.orderStatus || "").toLowerCase() === "placed"
+    ).length;
+    const shippedOrders = orders.filter(
+      (o) => (o.orderStatus || "").toLowerCase() === "shipped"
+    ).length;
+    const deliveredOrders = orders.filter(
+      (o) => (o.orderStatus || "").toLowerCase() === "delivered"
+    ).length;
+    const cancelledOrders = orders.filter(
+      (o) => (o.orderStatus || "").toLowerCase() === "cancelled"
+    ).length;
+
+    const paidOrders = orders.filter(
+      (o) => (o.payment?.status || "").toLowerCase() === "paid"
+    ).length;
+
+    const totalUnitsSold = orders.reduce((sum, order) => {
+      return (
+        sum +
+        (Array.isArray(order.items)
+          ? order.items.reduce((acc, item) => acc + Number(item.quantity || 0), 0)
+          : 0)
+      );
+    }, 0);
+
+    const productSalesMap = {};
+    orders.forEach((order) => {
+      (order.items || []).forEach((item) => {
+        const key = item.productId?._id || item.productId || item.name;
+        if (!productSalesMap[key]) {
+          productSalesMap[key] = {
+            name: item.name || "Unnamed Product",
+            imageUrl:
+              item.imageUrl ||
+              "https://dummyimage.com/200x200/e5e7eb/111827&text=No+Image",
+            unitsSold: 0,
+            revenue: 0,
+          };
+        }
+        productSalesMap[key].unitsSold += Number(item.quantity || 0);
+        productSalesMap[key].revenue += Number(item.lineTotal || 0);
+      });
+    });
+
+    const bestSellingProducts = Object.values(productSalesMap)
+      .sort((a, b) => b.unitsSold - a.unitsSold)
+      .slice(0, 6);
+
+    const recentOrders = [...orders]
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+      .slice(0, 6);
+
+    const recentRevenueMap = {};
+    const today = new Date();
+
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date(today);
+      date.setDate(today.getDate() - i);
+      const key = date.toISOString().slice(0, 10);
+      recentRevenueMap[key] = {
+        date: key,
+        label: date.toLocaleDateString("en-IN", {
+          day: "2-digit",
+          month: "short",
+        }),
+        revenue: 0,
+        orders: 0,
+      };
+    }
+
+    orders.forEach((order) => {
+      const created = new Date(order.createdAt);
+      const key = created.toISOString().slice(0, 10);
+      if (recentRevenueMap[key]) {
+        recentRevenueMap[key].revenue += Number(order?.pricing?.totalAmount || 0);
+        recentRevenueMap[key].orders += 1;
+      }
+    });
+
+    const recentRevenueTrend = Object.values(recentRevenueMap);
+
+    const lowStockProducts = [...products]
+      .filter(
+        (p) =>
+          Number(p.availabilityCount || 0) > 0 &&
+          Number(p.availabilityCount || 0) <= Number(p.minimumThresholdCount || 0)
+      )
+      .sort(
+        (a, b) => Number(a.availabilityCount || 0) - Number(b.availabilityCount || 0)
+      )
+      .slice(0, 6);
 
     return {
       totalProducts,
@@ -177,7 +310,6 @@ const Analytics = () => {
       draftProducts,
       archivedProducts,
       featuredProducts,
-      nonFeaturedProducts,
       totalStockUnits,
       totalInventoryValue,
       avgPrice,
@@ -190,8 +322,23 @@ const Analytics = () => {
       topBrands,
       topValueProducts,
       recentTrend,
+      totalOrders,
+      grossRevenue,
+      subtotalRevenue,
+      gstCollected,
+      avgOrderValue,
+      placedOrders,
+      shippedOrders,
+      deliveredOrders,
+      cancelledOrders,
+      paidOrders,
+      totalUnitsSold,
+      bestSellingProducts,
+      recentOrders,
+      recentRevenueTrend,
+      lowStockProducts,
     };
-  }, [products]);
+  }, [products, orders]);
 
   const maxCategoryCount = Math.max(
     ...analytics.categoryBreakdown.map((item) => item.count),
@@ -205,13 +352,43 @@ const Analytics = () => {
     1
   );
 
+  const maxRevenueBar = Math.max(
+    ...analytics.recentRevenueTrend.map((item) => Number(item.revenue || 0)),
+    1
+  );
+
+  const maxUnitsSold = Math.max(
+    ...analytics.bestSellingProducts.map((item) => Number(item.unitsSold || 0)),
+    1
+  );
+
   return (
     <>
       <AdminNavbar />
 
       <main className="min-h-screen bg-[linear-gradient(180deg,#f7f8fb_0%,#eef2f7_100%)] px-4 py-8 md:px-8">
         <div className="mx-auto max-w-7xl">
-          
+          <div className="mb-8 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-orange-500">
+                Analytics Center
+              </p>
+              <h1 className="mt-2 text-4xl font-black tracking-tight text-[#0e3558]">
+                My Store Analytics
+              </h1>
+              <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-500">
+                Track seller-specific catalog strength, stock movement, revenue,
+                orders, top products, and fulfillment trends.
+              </p>
+            </div>
+
+            <button
+              onClick={fetchAnalyticsData}
+              className="rounded-2xl bg-[#0e3558] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#164a79]"
+            >
+              Refresh Data
+            </button>
+          </div>
 
           {loading ? (
             <div className="rounded-[28px] bg-white p-8 shadow-xl">
@@ -223,7 +400,43 @@ const Analytics = () => {
             </div>
           ) : (
             <>
-              <section className="grid grid-cols-1 gap-6 xl:grid-cols-4">
+              <section className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-5">
+                <div className="rounded-[28px] bg-white p-6 shadow-xl shadow-slate-300/20">
+                  <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    Gross Revenue
+                  </p>
+                  <h2 className="mt-3 text-4xl font-black text-[#0e3558]">
+                    {formatCurrency(analytics.grossRevenue)}
+                  </h2>
+                  <p className="mt-2 text-sm text-slate-500">
+                    Total revenue earned from your orders.
+                  </p>
+                </div>
+
+                <div className="rounded-[28px] bg-white p-6 shadow-xl shadow-slate-300/20">
+                  <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    Total Orders
+                  </p>
+                  <h2 className="mt-3 text-4xl font-black text-[#0e3558]">
+                    {analytics.totalOrders}
+                  </h2>
+                  <p className="mt-2 text-sm text-slate-500">
+                    Orders containing your products.
+                  </p>
+                </div>
+
+                <div className="rounded-[28px] bg-white p-6 shadow-xl shadow-slate-300/20">
+                  <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    Average Order Value
+                  </p>
+                  <h2 className="mt-3 text-4xl font-black text-orange-500">
+                    {formatCurrency(analytics.avgOrderValue)}
+                  </h2>
+                  <p className="mt-2 text-sm text-slate-500">
+                    Average earning per seller order.
+                  </p>
+                </div>
+
                 <div className="rounded-[28px] bg-white p-6 shadow-xl shadow-slate-300/20">
                   <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">
                     Total Products
@@ -232,52 +445,150 @@ const Analytics = () => {
                     {analytics.totalProducts}
                   </h2>
                   <p className="mt-2 text-sm text-slate-500">
-                    Overall products contributing to your catalog analytics.
+                    Products owned by this admin.
                   </p>
                 </div>
 
                 <div className="rounded-[28px] bg-white p-6 shadow-xl shadow-slate-300/20">
                   <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    Avg Sell Price
-                  </p>
-                  <h2 className="mt-3 text-4xl font-black text-[#0e3558]">
-                    {formatCurrency(analytics.avgDiscountedPrice)}
-                  </h2>
-                  <p className="mt-2 text-sm text-slate-500">
-                    Average effective selling price after discounts.
-                  </p>
-                </div>
-
-                <div className="rounded-[28px] bg-white p-6 shadow-xl shadow-slate-300/20">
-                  <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    Featured Share
-                  </p>
-                  <h2 className="mt-3 text-4xl font-black text-orange-500">
-                    {analytics.totalProducts === 0
-                      ? "0%"
-                      : `${Math.round(
-                          (analytics.featuredProducts / analytics.totalProducts) * 100
-                        )}%`}
-                  </h2>
-                  <p className="mt-2 text-sm text-slate-500">
-                    Portion of catalog currently highlighted as featured.
-                  </p>
-                </div>
-
-                <div className="rounded-[28px] bg-white p-6 shadow-xl shadow-slate-300/20">
-                  <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    Stock Coverage
+                    Inventory Value
                   </p>
                   <h2 className="mt-3 text-4xl font-black text-green-600">
-                    {analytics.totalProducts === 0
-                      ? "0%"
-                      : `${Math.round(
-                          (analytics.inStock / analytics.totalProducts) * 100
-                        )}%`}
+                    {formatCurrency(analytics.totalInventoryValue)}
                   </h2>
                   <p className="mt-2 text-sm text-slate-500">
-                    Share of products that are currently in stock.
+                    Value of available stock in your catalog.
                   </p>
+                </div>
+              </section>
+
+              <section className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[1.25fr_0.75fr]">
+                <div className="rounded-[30px] bg-white p-6 shadow-2xl shadow-slate-300/20">
+                  <p className="text-sm font-semibold uppercase tracking-[0.2em] text-orange-500">
+                    Sales Trend
+                  </p>
+                  <h2 className="mt-2 text-2xl font-black text-[#0e3558]">
+                    Revenue in the Last 7 Days
+                  </h2>
+
+                  <div className="mt-8 flex h-[320px] items-end gap-4 overflow-x-auto rounded-[24px] bg-slate-50 px-4 py-6">
+                    {analytics.recentRevenueTrend.map((item) => {
+                      const height = `${(item.revenue / maxRevenueBar) * 220}px`;
+
+                      return (
+                        <div
+                          key={item.date}
+                          className="flex min-w-[86px] flex-1 flex-col items-center justify-end"
+                        >
+                          <p className="mb-2 text-xs font-semibold text-slate-500">
+                            {formatCurrency(item.revenue)}
+                          </p>
+
+                          <div
+                            className="w-full rounded-t-[18px] bg-gradient-to-t from-orange-500 to-[#0e3558]"
+                            style={{ height }}
+                          />
+
+                          <p className="mt-3 text-center text-xs font-semibold text-[#0e3558]">
+                            {item.label}
+                          </p>
+                          <p className="mt-1 text-[11px] text-slate-400">
+                            {item.orders} orders
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="rounded-[30px] bg-white p-6 shadow-2xl shadow-slate-300/20">
+                  <p className="text-sm font-semibold uppercase tracking-[0.2em] text-orange-500">
+                    Fulfillment State
+                  </p>
+                  <h2 className="mt-2 text-2xl font-black text-[#0e3558]">
+                    Order Status Snapshot
+                  </h2>
+
+                  <div className="mt-6 space-y-4">
+                    {[
+                      {
+                        label: "Placed",
+                        value: analytics.placedOrders,
+                        color: "bg-amber-500",
+                        bg: "bg-amber-50",
+                        text: "text-amber-700",
+                      },
+                      {
+                        label: "Shipped",
+                        value: analytics.shippedOrders,
+                        color: "bg-blue-500",
+                        bg: "bg-blue-50",
+                        text: "text-blue-700",
+                      },
+                      {
+                        label: "Delivered",
+                        value: analytics.deliveredOrders,
+                        color: "bg-green-500",
+                        bg: "bg-green-50",
+                        text: "text-green-700",
+                      },
+                      {
+                        label: "Cancelled",
+                        value: analytics.cancelledOrders,
+                        color: "bg-red-500",
+                        bg: "bg-red-50",
+                        text: "text-red-700",
+                      },
+                    ].map((item) => {
+                      const percentage =
+                        analytics.totalOrders === 0
+                          ? 0
+                          : Math.round((item.value / analytics.totalOrders) * 100);
+
+                      return (
+                        <div key={item.label} className={`rounded-2xl ${item.bg} px-4 py-4`}>
+                          <div className="mb-2 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <span className={`h-3 w-3 rounded-full ${item.color}`} />
+                              <p className={`font-semibold ${item.text}`}>{item.label}</p>
+                            </div>
+                            <p className={`font-bold ${item.text}`}>{item.value}</p>
+                          </div>
+
+                          <div className="h-2 overflow-hidden rounded-full bg-white">
+                            <div
+                              className={`h-full rounded-full ${item.color}`}
+                              style={{ width: `${percentage}%` }}
+                            />
+                          </div>
+
+                          <p className="mt-2 text-xs text-slate-400">
+                            {percentage}% of your total orders
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="mt-6 grid grid-cols-2 gap-3">
+                    <div className="rounded-2xl bg-slate-50 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                        Paid Orders
+                      </p>
+                      <p className="mt-2 text-2xl font-black text-[#0e3558]">
+                        {analytics.paidOrders}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl bg-slate-50 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                        Units Sold
+                      </p>
+                      <p className="mt-2 text-2xl font-black text-[#0e3558]">
+                        {analytics.totalUnitsSold}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </section>
 
@@ -302,9 +613,7 @@ const Analytics = () => {
                         <div key={item.name}>
                           <div className="mb-2 flex items-center justify-between gap-4">
                             <div>
-                              <p className="font-semibold text-[#0e3558]">
-                                {item.name}
-                              </p>
+                              <p className="font-semibold text-[#0e3558]">{item.name}</p>
                               <p className="text-sm text-slate-500">
                                 {item.count} products • {item.units} units
                               </p>
@@ -388,11 +697,31 @@ const Analytics = () => {
                           </div>
 
                           <p className="mt-2 text-xs text-slate-400">
-                            {percentage}% of total catalog
+                            {percentage}% of your catalog
                           </p>
                         </div>
                       );
                     })}
+                  </div>
+
+                  <div className="mt-6 grid grid-cols-2 gap-3">
+                    <div className="rounded-2xl bg-slate-50 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                        Featured
+                      </p>
+                      <p className="mt-2 text-2xl font-black text-orange-500">
+                        {analytics.featuredProducts}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl bg-slate-50 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                        Avg Price
+                      </p>
+                      <p className="mt-2 text-2xl font-black text-[#0e3558]">
+                        {formatCurrency(analytics.avgDiscountedPrice)}
+                      </p>
+                    </div>
                   </div>
                 </div>
               </section>
@@ -435,6 +764,13 @@ const Analytics = () => {
                     <div className="flex items-center justify-between rounded-2xl bg-red-50 px-4 py-3">
                       <p className="font-semibold text-red-700">Out of Stock</p>
                       <p className="font-bold text-red-700">{analytics.outOfStock}</p>
+                    </div>
+
+                    <div className="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3">
+                      <p className="font-semibold text-slate-700">Stock Units</p>
+                      <p className="font-bold text-slate-700">
+                        {analytics.totalStockUnits}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -518,7 +854,10 @@ const Analytics = () => {
                           >
                             <div className="flex items-center gap-3">
                               <img
-                                src={product.imageUrl}
+                                src={
+                                  product.imageUrl ||
+                                  "https://dummyimage.com/200x200/e5e7eb/111827&text=No+Image"
+                                }
                                 alt={product.name}
                                 className="h-12 w-12 rounded-xl object-cover"
                               />
@@ -591,6 +930,169 @@ const Analytics = () => {
                           </div>
                         );
                       })
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              <section className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[1fr_1fr]">
+                <div className="rounded-[30px] bg-white p-6 shadow-2xl shadow-slate-300/20">
+                  <p className="text-sm font-semibold uppercase tracking-[0.2em] text-orange-500">
+                    Sales Leaders
+                  </p>
+                  <h2 className="mt-2 text-2xl font-black text-[#0e3558]">
+                    Best-Selling Products
+                  </h2>
+
+                  <div className="mt-6 space-y-4">
+                    {analytics.bestSellingProducts.length === 0 ? (
+                      <p className="text-slate-500">No sales data available.</p>
+                    ) : (
+                      analytics.bestSellingProducts.map((item) => (
+                        <div
+                          key={item.name}
+                          className="rounded-2xl border border-slate-100 bg-slate-50 p-4"
+                        >
+                          <div className="mb-3 flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                              <img
+                                src={item.imageUrl}
+                                alt={item.name}
+                                className="h-12 w-12 rounded-xl object-cover"
+                              />
+                              <div>
+                                <p className="font-semibold text-[#0e3558]">
+                                  {item.name}
+                                </p>
+                                <p className="text-xs text-slate-400">
+                                  Revenue: {formatCurrency(item.revenue)}
+                                </p>
+                              </div>
+                            </div>
+                            <p className="font-bold text-slate-600">
+                              {item.unitsSold} sold
+                            </p>
+                          </div>
+
+                          <div className="h-2 overflow-hidden rounded-full bg-white">
+                            <div
+                              className="h-full rounded-full bg-orange-500"
+                              style={{
+                                width: `${(item.unitsSold / maxUnitsSold) * 100}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-[30px] bg-white p-6 shadow-2xl shadow-slate-300/20">
+                  <p className="text-sm font-semibold uppercase tracking-[0.2em] text-orange-500">
+                    Operational Alerts
+                  </p>
+                  <h2 className="mt-2 text-2xl font-black text-[#0e3558]">
+                    Low Stock Attention List
+                  </h2>
+
+                  <div className="mt-6 space-y-4">
+                    {analytics.lowStockProducts.length === 0 ? (
+                      <p className="text-slate-500">No urgent stock alerts right now.</p>
+                    ) : (
+                      analytics.lowStockProducts.map((product) => (
+                        <div
+                          key={product._id}
+                          className="flex items-center justify-between rounded-2xl border border-amber-100 bg-amber-50 px-4 py-4"
+                        >
+                          <div className="flex items-center gap-3">
+                            <img
+                              src={
+                                product.imageUrl ||
+                                "https://dummyimage.com/200x200/e5e7eb/111827&text=No+Image"
+                              }
+                              alt={product.name}
+                              className="h-12 w-12 rounded-xl object-cover"
+                            />
+                            <div>
+                              <p className="font-semibold text-[#0e3558]">
+                                {product.name}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                Threshold: {product.minimumThresholdCount || 0}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="text-right">
+                            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-600">
+                              Remaining
+                            </p>
+                            <p className="text-xl font-black text-amber-700">
+                              {product.availabilityCount || 0}
+                            </p>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              <section className="mt-6 rounded-[30px] bg-white p-6 shadow-2xl shadow-slate-300/20">
+                <p className="text-sm font-semibold uppercase tracking-[0.2em] text-orange-500">
+                  Live Feed
+                </p>
+                <h2 className="mt-2 text-2xl font-black text-[#0e3558]">
+                  Recent Orders
+                </h2>
+
+                <div className="mt-6 overflow-hidden rounded-[24px] border border-slate-100">
+                  <div className="grid grid-cols-[1.2fr_0.8fr_0.8fr_0.8fr_0.8fr] bg-slate-50 px-4 py-4 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                    <p>Customer</p>
+                    <p>Date</p>
+                    <p>Status</p>
+                    <p>Payment</p>
+                    <p className="text-right">Total</p>
+                  </div>
+
+                  <div className="divide-y divide-slate-100">
+                    {analytics.recentOrders.length === 0 ? (
+                      <div className="px-4 py-6 text-sm text-slate-500">
+                        No orders available.
+                      </div>
+                    ) : (
+                      analytics.recentOrders.map((order) => (
+                        <div
+                          key={order._id}
+                          className="grid grid-cols-[1.2fr_0.8fr_0.8fr_0.8fr_0.8fr] items-center px-4 py-4"
+                        >
+                          <div>
+                            <p className="font-semibold text-[#0e3558]">
+                              {order.customer?.fullName || "Customer"}
+                            </p>
+                            <p className="text-xs text-slate-400">
+                              {order.customer?.phone || "No phone"}
+                            </p>
+                          </div>
+
+                          <p className="text-sm font-medium text-slate-600">
+                            {formatDate(order.createdAt)}
+                          </p>
+
+                          <p className="text-sm font-semibold capitalize text-[#0e3558]">
+                            {order.orderStatus || "placed"}
+                          </p>
+
+                          <p className="text-sm font-semibold capitalize text-green-600">
+                            {order.payment?.status || "paid"}
+                          </p>
+
+                          <p className="text-right font-bold text-[#0e3558]">
+                            {formatCurrency(order.pricing?.totalAmount || 0)}
+                          </p>
+                        </div>
+                      ))
                     )}
                   </div>
                 </div>

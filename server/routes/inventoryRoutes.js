@@ -116,4 +116,39 @@ router.put("/inventory/:id", async (req, res) => {
   }
 });
 
+router.get("/admin/inventory/:adminId", async (req, res) => {
+  try {
+    const { adminId } = req.params;
+    const products = await Product.find({ adminId }).sort({ createdAt: -1 });
+    res.json({ products });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch admin inventory." });
+  }
+});
+
+router.put("/admin/inventory/:productId", async (req, res) => {
+  try {
+    const { productId } = req.params;
+    const { adminId, availabilityCount, minimumThresholdCount, orderCount, status } =
+      req.body;
+
+    const product = await Product.findOne({ _id: productId, adminId });
+
+    if (!product) {
+      return res.status(404).json({ error: "Product not found for this admin." });
+    }
+
+    product.availabilityCount = Number(availabilityCount || 0);
+    product.minimumThresholdCount = Number(minimumThresholdCount || 0);
+    product.orderCount = Number(orderCount || 0);
+    product.status = status;
+
+    await product.save();
+
+    res.json({ product });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to update inventory." });
+  }
+});
+
 module.exports = router;
