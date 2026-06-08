@@ -1,15 +1,12 @@
-version: "3.9"
+name: ekadai
 
 services:
   chromadb:
     image: ghcr.io/chroma-core/chroma:latest
-    container_name: ekadai_chromadb
     ports:
       - "8000:8000"
     environment:
       IS_PERSISTENT: "TRUE"
-      PERSIST_DIRECTORY: "/chroma/chroma"
-      ALLOW_RESET: "TRUE"
     volumes:
-      - ./chroma/chroma:/chroma/chroma
+      - ./chroma/chroma:/data
     restart: unless-stopped

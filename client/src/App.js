@@ -18,6 +18,7 @@ import OrdersListing from "./components/user/OrdersListing";
 import Cart from "./components/user/Cart";
 import Wishlist from "./components/user/Wishlist";
 import CartCheckout from "./components/user/CartCheckout";
+import ProductWorkspace from "./components/admin/ProductWorkspace";
 
 const App = () => {
   return (
@@ -39,6 +40,7 @@ const App = () => {
 
         <Route path="/admin/dashboard" element={<Dashboard />} />
         <Route path="/admin/products" element={<Products /> } />
+        <Route path="/admin/products/:productId" element={<ProductWorkspace />} />
         <Route path="/admin/newproduct" element={<NewProduct />} />
         <Route path="/admin/orders" element={<Orders />} />
         <Route path="/admin/inventory" element={<Inventory />} />

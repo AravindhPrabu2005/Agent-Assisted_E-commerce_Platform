@@ -30,6 +30,12 @@ const MessageSchema = new mongoose.Schema(
 
 const ConversationSchema = new mongoose.Schema(
   {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+      index: true,
+      ref: "User",
+    },
     title: {
       type: String,
       trim: true,

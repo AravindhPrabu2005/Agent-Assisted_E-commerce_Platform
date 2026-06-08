@@ -35,6 +35,27 @@ const isValidMongoId = (id) => {
   );
 };
 
+const getRequestUserId = (req) => {
+  const headerUserId = req.headers["x-user-id"];
+  const bodyUserId = req.body?.userId;
+  const queryUserId = req.query?.userId;
+  const userId = headerUserId || bodyUserId || queryUserId || "";
+  return typeof userId === "string" ? userId.trim() : "";
+};
+
+const requireUserId = (req, res, next) => {
+  const userId = getRequestUserId(req);
+
+  if (!isValidMongoId(userId)) {
+    return res.status(401).json({
+      message: "Valid user id is required.",
+    });
+  }
+
+  req.userId = userId;
+  next();
+};
+
 const validateConversationId = (req, res, next) => {
   const { id } = req.params;
 
@@ -48,9 +69,10 @@ const validateConversationId = (req, res, next) => {
   next();
 };
 
-router.post("/conversations", async (req, res) => {
+router.post("/conversations", requireUserId, async (req, res) => {
   try {
     const conversation = await Conversation.create({
+      userId: req.userId,
       title: "New chat",
       messages: [getWelcomeMessage()],
     });
@@ -65,9 +87,9 @@ router.post("/conversations", async (req, res) => {
   }
 });
 
-router.get("/conversations", async (req, res) => {
+router.get("/conversations", requireUserId, async (req, res) => {
   try {
-    const conversations = await Conversation.find({})
+    const conversations = await Conversation.find({ userId: req.userId })
       .sort({ updatedAt: -1 })
       .select("_id title createdAt updatedAt");
 
@@ -81,26 +103,35 @@ router.get("/conversations", async (req, res) => {
   }
 });
 
-router.get("/conversations/:id", validateConversationId, async (req, res) => {
-  try {
-    const conversation = await Conversation.findById(req.params.id);
+router.get(
+  "/conversations/:id",
+  requireUserId,
+  validateConversationId,
+  async (req, res) => {
+    try {
+      const conversation = await Conversation.findOne({
+        _id: req.params.id,
+        userId: req.userId,
+      });
 
-    if (!conversation) {
-      return res.status(404).json({ message: "Conversation not found." });
+      if (!conversation) {
+        return res.status(404).json({ message: "Conversation not found." });
+      }
+
+      res.json(conversation);
+    } catch (error) {
+      console.error("Fetch conversation error:", error);
+      res.status(500).json({
+        message: "Failed to fetch conversation.",
+        error: error.message,
+      });
     }
-
-    res.json(conversation);
-  } catch (error) {
-    console.error("Fetch conversation error:", error);
-    res.status(500).json({
-      message: "Failed to fetch conversation.",
-      error: error.message,
-    });
   }
-});
+);
 
 router.patch(
   "/conversations/:id/title",
+  requireUserId,
   validateConversationId,
   async (req, res) => {
     try {
@@ -110,8 +141,8 @@ router.patch(
         return res.status(400).json({ message: "Title is required." });
       }
 
-      const conversation = await Conversation.findByIdAndUpdate(
-        req.params.id,
+      const conversation = await Conversation.findOneAndUpdate(
+        { _id: req.params.id, userId: req.userId },
         { title: title.trim() },
         { new: true }
       );
@@ -131,26 +162,35 @@ router.patch(
   }
 );
 
-router.delete("/conversations/:id", validateConversationId, async (req, res) => {
-  try {
-    const conversation = await Conversation.findByIdAndDelete(req.params.id);
+router.delete(
+  "/conversations/:id",
+  requireUserId,
+  validateConversationId,
+  async (req, res) => {
+    try {
+      const conversation = await Conversation.findOneAndDelete({
+        _id: req.params.id,
+        userId: req.userId,
+      });
 
-    if (!conversation) {
-      return res.status(404).json({ message: "Conversation not found." });
+      if (!conversation) {
+        return res.status(404).json({ message: "Conversation not found." });
+      }
+
+      res.json({ message: "Conversation deleted successfully." });
+    } catch (error) {
+      console.error("Delete conversation error:", error);
+      res.status(500).json({
+        message: "Failed to delete conversation.",
+        error: error.message,
+      });
     }
-
-    res.json({ message: "Conversation deleted successfully." });
-  } catch (error) {
-    console.error("Delete conversation error:", error);
-    res.status(500).json({
-      message: "Failed to delete conversation.",
-      error: error.message,
-    });
   }
-});
+);
 
 router.post(
   "/conversations/:id/messages",
+  requireUserId,
   validateConversationId,
   async (req, res) => {
     try {
@@ -164,7 +204,10 @@ router.post(
         return res.status(400).json({ message: "Assistant message is required." });
       }
 
-      const conversation = await Conversation.findById(req.params.id);
+      const conversation = await Conversation.findOne({
+        _id: req.params.id,
+        userId: req.userId,
+      });
 
       if (!conversation) {
         return res.status(404).json({ message: "Conversation not found." });

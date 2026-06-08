@@ -5,6 +5,10 @@ const router = express.Router();
 const Review = require("../models/Review");
 const Order = require("../models/Order");
 const Product = require("../models/Product");
+const { upsertProductToChroma } = require("../services/chromaService");
+
+const isValidMongoId = (id) =>
+  typeof id === "string" && mongoose.Types.ObjectId.isValid(id);
 
 router.post("/reviews", async (req, res) => {
   try {
@@ -13,6 +17,18 @@ router.post("/reviews", async (req, res) => {
     if (!orderId || !productId || !customerName || !rating || !reviewText?.trim()) {
       return res.status(400).json({
         message: "orderId, productId, customerName, rating and reviewText are required.",
+      });
+    }
+
+    if (!isValidMongoId(orderId) || !isValidMongoId(productId)) {
+      return res.status(400).json({
+        message: "Invalid orderId or productId.",
+      });
+    }
+
+    if (userId && !isValidMongoId(userId)) {
+      return res.status(400).json({
+        message: "Invalid userId.",
       });
     }
 
@@ -37,6 +53,14 @@ router.post("/reviews", async (req, res) => {
     if (!orderedItem) {
       return res.status(400).json({
         message: "This product does not belong to the selected order.",
+      });
+    }
+
+    const product = await Product.findById(productId);
+
+    if (!product) {
+      return res.status(404).json({
+        message: "Product not found.",
       });
     }
 
@@ -73,23 +97,38 @@ router.post("/reviews", async (req, res) => {
       reviewText: reviewText.trim(),
     });
 
-    const productReviews = await Review.find({ productId });
+    const productReviews = await Review.find({ productId }).lean();
     const reviewCount = productReviews.length;
     const averageRating =
       reviewCount > 0
         ? productReviews.reduce((sum, item) => sum + item.rating, 0) / reviewCount
         : 0;
 
-    await Product.findByIdAndUpdate(productId, {
-      averageRating: Number(averageRating.toFixed(1)),
-      reviewCount,
-    });
+    product.averageRating = Number(averageRating.toFixed(1));
+    product.reviewCount = reviewCount;
+
+    if (product.ratingAverage !== undefined) {
+      product.ratingAverage = Number(averageRating.toFixed(1));
+    }
+    if (product.ratingCount !== undefined) {
+      product.ratingCount = reviewCount;
+    }
+
+    await product.save();
+
+    await upsertProductToChroma(product);
 
     return res.status(201).json({
       message: "Review submitted successfully.",
       review,
+      productRating: {
+        averageRating: product.averageRating ?? product.ratingAverage ?? 0,
+        reviewCount: product.reviewCount ?? product.ratingCount ?? 0,
+      },
     });
   } catch (error) {
+    console.error("Create review error:", error);
+
     if (error.code === 11000) {
       return res.status(409).json({
         message: "You have already reviewed this product.",
@@ -104,7 +143,15 @@ router.post("/reviews", async (req, res) => {
 
 router.get("/reviews/product/:productId", async (req, res) => {
   try {
-    const reviews = await Review.find({ productId: req.params.productId }).sort({
+    const { productId } = req.params;
+
+    if (!isValidMongoId(productId)) {
+      return res.status(400).json({
+        message: "Invalid productId.",
+      });
+    }
+
+    const reviews = await Review.find({ productId }).sort({
       createdAt: -1,
     });
 
@@ -128,11 +175,27 @@ router.get("/reviews/check", async (req, res) => {
       });
     }
 
+    if (!isValidMongoId(productId)) {
+      return res.status(400).json({
+        message: "Invalid productId.",
+      });
+    }
+
     let review = null;
 
     if (userId) {
+      if (!isValidMongoId(userId)) {
+        return res.status(400).json({
+          message: "Invalid userId.",
+        });
+      }
       review = await Review.findOne({ productId, userId });
     } else if (orderId) {
+      if (!isValidMongoId(orderId)) {
+        return res.status(400).json({
+          message: "Invalid orderId.",
+        });
+      }
       review = await Review.findOne({ productId, orderId });
     }
 

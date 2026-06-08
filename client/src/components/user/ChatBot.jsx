@@ -4,6 +4,12 @@ import UserNavbar from "./UserNavbar";
 import axiosInstance from "../../axiosInstance";
 
 const ChatBot = () => {
+  const currentUserId =
+    localStorage.getItem("userId") ||
+    localStorage.getItem("customerId") ||
+    localStorage.getItem("id") ||
+    "";
+
   const [conversations, setConversations] = useState([]);
   const [activeConversationId, setActiveConversationId] = useState(null);
   const [activeConversation, setActiveConversation] = useState(null);
@@ -15,6 +21,7 @@ const ChatBot = () => {
 
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
+  const latestRequestIdRef = useRef(0);
 
   const messages = useMemo(() => {
     return Array.isArray(activeConversation?.messages)
@@ -26,6 +33,12 @@ const ChatBot = () => {
     return typeof id === "string" && /^[a-fA-F0-9]{24}$/.test(id.trim());
   };
 
+  const getUserRequestConfig = () => ({
+    headers: {
+      "x-user-id": currentUserId,
+    },
+  });
+
   const scrollToBottom = (behavior = "smooth") => {
     requestAnimationFrame(() => {
       bottomRef.current?.scrollIntoView({ behavior, block: "end" });
@@ -33,34 +46,51 @@ const ChatBot = () => {
   };
 
   const loadConversationById = async (conversationId) => {
-    if (!isValidMongoId(conversationId)) {
-      console.error("Invalid conversation id:", conversationId);
-      return;
-    }
+    if (!isValidMongoId(conversationId)) return;
+    if (!isValidMongoId(currentUserId)) return;
 
     try {
       setConversationLoading(true);
-      const res = await axiosInstance.get(`/conversations/${conversationId.trim()}`);
+      const res = await axiosInstance.get(
+        `/conversations/${conversationId.trim()}`,
+        getUserRequestConfig()
+      );
       setActiveConversation(res.data);
       setActiveConversationId(res.data._id);
       setMobileSidebarOpen(false);
       scrollToBottom("auto");
     } catch (error) {
-      console.error("Failed to load conversation:", error.response?.data || error.message);
+      console.error(
+        "Failed to load conversation:",
+        error.response?.data || error.message
+      );
     } finally {
       setConversationLoading(false);
     }
   };
 
   const loadConversations = async (preferredId = null) => {
+    if (!isValidMongoId(currentUserId)) {
+      setSidebarLoading(false);
+      setConversations([]);
+      setActiveConversation(null);
+      setActiveConversationId(null);
+      return;
+    }
+
     try {
       setSidebarLoading(true);
-      const res = await axiosInstance.get("/conversations");
+      const res = await axiosInstance.get("/conversations", getUserRequestConfig());
       const list = Array.isArray(res.data) ? res.data : [];
       setConversations(list);
 
       if (list.length === 0) {
-        const created = await axiosInstance.post("/conversations");
+        const created = await axiosInstance.post(
+          "/conversations",
+          { userId: currentUserId },
+          getUserRequestConfig()
+        );
+
         const newConversation = created.data;
 
         setConversations([
@@ -87,15 +117,22 @@ const ChatBot = () => {
         await loadConversationById(nextId);
       }
     } catch (error) {
-      console.error("Failed to load conversations:", error.response?.data || error.message);
+      console.error(
+        "Failed to load conversations:",
+        error.response?.data || error.message
+      );
     } finally {
       setSidebarLoading(false);
     }
   };
 
   useEffect(() => {
+    if (!isValidMongoId(currentUserId)) {
+      setSidebarLoading(false);
+      return;
+    }
     loadConversations();
-  }, []);
+  }, [currentUserId]);
 
   useEffect(() => {
     scrollToBottom("smooth");
@@ -104,12 +141,21 @@ const ChatBot = () => {
   useEffect(() => {
     if (!textareaRef.current) return;
     textareaRef.current.style.height = "auto";
-    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
+    textareaRef.current.style.height = `${Math.min(
+      textareaRef.current.scrollHeight,
+      160
+    )}px`;
   }, [input]);
 
   const handleNewChat = async () => {
+    if (!isValidMongoId(currentUserId)) return;
+
     try {
-      const res = await axiosInstance.post("/conversations");
+      const res = await axiosInstance.post(
+        "/conversations",
+        { userId: currentUserId },
+        getUserRequestConfig()
+      );
       const newConversation = res.data;
 
       setConversations((prev) => [
@@ -128,23 +174,31 @@ const ChatBot = () => {
       setMobileSidebarOpen(false);
       scrollToBottom("auto");
     } catch (error) {
-      console.error("Failed to create conversation:", error.response?.data || error.message);
+      console.error(
+        "Failed to create conversation:",
+        error.response?.data || error.message
+      );
     }
   };
 
   const handleRenameConversation = async (conversationId, currentTitle) => {
-    if (!isValidMongoId(conversationId)) {
-      console.error("Invalid conversation id for rename:", conversationId);
-      return;
-    }
+    if (!isValidMongoId(conversationId) || !isValidMongoId(currentUserId)) return;
 
-    const nextTitle = window.prompt("Rename conversation", currentTitle || "New chat");
+    const nextTitle = window.prompt(
+      "Rename conversation",
+      currentTitle || "New chat"
+    );
     if (!nextTitle || !nextTitle.trim()) return;
 
     try {
-      const res = await axiosInstance.patch(`/conversations/${conversationId.trim()}/title`, {
-        title: nextTitle.trim(),
-      });
+      const res = await axiosInstance.patch(
+        `/conversations/${conversationId.trim()}/title`,
+        {
+          title: nextTitle.trim(),
+          userId: currentUserId,
+        },
+        getUserRequestConfig()
+      );
 
       setConversations((prev) =>
         prev.map((item) =>
@@ -170,24 +224,31 @@ const ChatBot = () => {
         );
       }
     } catch (error) {
-      console.error("Failed to rename conversation:", error.response?.data || error.message);
+      console.error(
+        "Failed to rename conversation:",
+        error.response?.data || error.message
+      );
     }
   };
 
   const handleDeleteConversation = async (conversationId) => {
-    if (!isValidMongoId(conversationId)) {
-      console.error("Invalid conversation id for delete:", conversationId);
-      return;
-    }
+    if (!isValidMongoId(conversationId) || !isValidMongoId(currentUserId)) return;
 
     try {
-      await axiosInstance.delete(`/conversations/${conversationId.trim()}`);
+      await axiosInstance.delete(
+        `/conversations/${conversationId.trim()}`,
+        getUserRequestConfig()
+      );
 
       const remaining = conversations.filter((item) => item._id !== conversationId);
       setConversations(remaining);
 
       if (remaining.length === 0) {
-        const created = await axiosInstance.post("/conversations");
+        const created = await axiosInstance.post(
+          "/conversations",
+          { userId: currentUserId },
+          getUserRequestConfig()
+        );
         const newConversation = created.data;
 
         setConversations([
@@ -203,23 +264,39 @@ const ChatBot = () => {
         return;
       }
 
-      if (activeConversationId === conversationId && isValidMongoId(remaining[0]?._id)) {
+      if (
+        activeConversationId === conversationId &&
+        isValidMongoId(remaining[0]?._id)
+      ) {
         await loadConversationById(remaining[0]._id);
       }
     } catch (error) {
-      console.error("Failed to delete conversation:", error.response?.data || error.message);
+      console.error(
+        "Failed to delete conversation:",
+        error.response?.data || error.message
+      );
     }
   };
 
   const sendMessage = async (text = input) => {
     const finalText = text.trim();
 
-    if (!finalText || loading || !activeConversation || !isValidMongoId(activeConversationId)) {
+    if (!isValidMongoId(currentUserId)) return;
+    if (
+      !finalText ||
+      loading ||
+      !activeConversation ||
+      !isValidMongoId(activeConversationId)
+    ) {
       return;
     }
 
+    const conversationIdAtSend = activeConversationId;
+    const requestId = Date.now();
+    latestRequestIdRef.current = requestId;
+
     const optimisticUserMessage = {
-      _id: `temp-user-${Date.now()}`,
+      _id: `temp-user-${requestId}`,
       role: "user",
       content: finalText,
       recommendations: [],
@@ -240,6 +317,9 @@ const ChatBot = () => {
       const historyForAI = nextMessages.map((message) => ({
         role: message.role,
         content: message.content,
+        recommendations: Array.isArray(message.recommendations)
+          ? message.recommendations
+          : [],
       }));
 
       const aiRes = await axiosInstance.post("/product-finder", {
@@ -247,25 +327,37 @@ const ChatBot = () => {
         history: historyForAI,
       });
 
+      if (latestRequestIdRef.current !== requestId) return;
+
       const assistantMessage = {
         role: "assistant",
-        content: aiRes.data?.answer || "I could not find an answer for that query.",
-        recommendations: Array.isArray(aiRes.data?.sources) ? aiRes.data.sources : [],
+        content:
+          aiRes.data?.answer || "I could not find an answer for that query.",
+        recommendations: Array.isArray(aiRes.data?.sources)
+          ? aiRes.data.sources
+          : [],
       };
 
       const saveRes = await axiosInstance.post(
-        `/conversations/${activeConversationId.trim()}/messages`,
+        `/conversations/${conversationIdAtSend.trim()}/messages`,
         {
+          userId: currentUserId,
           userMessage: {
             content: finalText,
           },
           assistantMessage,
-        }
+        },
+        getUserRequestConfig()
       );
 
+      if (latestRequestIdRef.current !== requestId) return;
+
       const savedConversation = saveRes.data;
-      setActiveConversation(savedConversation);
-      setActiveConversationId(savedConversation._id);
+
+      if (savedConversation._id === conversationIdAtSend) {
+        setActiveConversation(savedConversation);
+        setActiveConversationId(savedConversation._id);
+      }
 
       setConversations((prev) =>
         [
@@ -281,10 +373,14 @@ const ChatBot = () => {
     } catch (err) {
       console.error("Send message error:", err.response?.data || err.message);
 
+      if (latestRequestIdRef.current !== requestId) return;
+
       setActiveConversation((prev) => ({
         ...prev,
         messages: [
-          ...(prev?.messages || []).filter((message) => message._id !== optimisticUserMessage._id),
+          ...(prev?.messages || []).filter(
+            (message) => message._id !== optimisticUserMessage._id
+          ),
           {
             _id: `temp-assistant-${Date.now()}`,
             role: "assistant",
@@ -296,7 +392,9 @@ const ChatBot = () => {
         ],
       }));
     } finally {
-      setLoading(false);
+      if (latestRequestIdRef.current === requestId) {
+        setLoading(false);
+      }
       scrollToBottom();
     }
   };
@@ -322,7 +420,7 @@ const ChatBot = () => {
   };
 
   const openProduct = (id) => {
-    if (!id) return;
+    if (!id || !isValidMongoId(id)) return;
     window.open(`/user/product/${id}`, "_blank", "noopener,noreferrer");
   };
 
@@ -385,13 +483,22 @@ const ChatBot = () => {
         <ReactMarkdown
           components={{
             p: ({ node, ...props }) => (
-              <p className="my-2 whitespace-pre-wrap text-sm leading-7 sm:text-[15px]" {...props} />
+              <p
+                className="my-2 whitespace-pre-wrap text-sm leading-7 sm:text-[15px]"
+                {...props}
+              />
             ),
             ul: ({ node, ...props }) => (
-              <ul className="my-2 list-disc pl-5 text-sm leading-7 sm:text-[15px]" {...props} />
+              <ul
+                className="my-2 list-disc pl-5 text-sm leading-7 sm:text-[15px]"
+                {...props}
+              />
             ),
             ol: ({ node, ...props }) => (
-              <ol className="my-2 list-decimal pl-5 text-sm leading-7 sm:text-[15px]" {...props} />
+              <ol
+                className="my-2 list-decimal pl-5 text-sm leading-7 sm:text-[15px]"
+                {...props}
+              />
             ),
             li: ({ node, ...props }) => <li className="my-1 pl-1" {...props} />,
             strong: ({ node, ...props }) => (
@@ -477,7 +584,10 @@ const ChatBot = () => {
                         <div className="flex shrink-0 items-center gap-1 opacity-100 transition lg:opacity-0 lg:group-hover:opacity-100">
                           <button
                             onClick={() =>
-                              handleRenameConversation(conversation._id, conversation.title)
+                              handleRenameConversation(
+                                conversation._id,
+                                conversation.title
+                              )
                             }
                             aria-label="Rename conversation"
                             className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
@@ -555,8 +665,8 @@ const ChatBot = () => {
                           Start your product search
                         </h2>
                         <p className="mt-3 text-sm leading-7 text-slate-500 sm:text-[15px]">
-                          Ask for products by budget, features, category, or use case, and get
-                          clean suggestions with matching items.
+                          Ask for products by budget, features, category, or use
+                          case, and get clean suggestions with matching items.
                         </p>
                       </div>
                     </div>
@@ -566,12 +676,16 @@ const ChatBot = () => {
                         <div
                           key={message._id || message.id || index}
                           className={`flex w-full ${
-                            message.role === "user" ? "justify-end" : "justify-start"
+                            message.role === "user"
+                              ? "justify-end"
+                              : "justify-start"
                           }`}
                         >
                           <div
                             className={`flex w-full max-w-3xl flex-col ${
-                              message.role === "user" ? "items-end" : "items-start"
+                              message.role === "user"
+                                ? "items-end"
+                                : "items-start"
                             }`}
                           >
                             <div
@@ -684,7 +798,11 @@ const ChatBot = () => {
 
                       <button
                         onClick={() => sendMessage()}
-                        disabled={loading || !activeConversationId}
+                        disabled={
+                          loading ||
+                          !activeConversationId ||
+                          !isValidMongoId(currentUserId)
+                        }
                         className="flex h-11 min-w-11 shrink-0 items-center justify-center rounded-[18px] bg-[#0e3558] px-4 text-sm font-semibold text-white transition hover:bg-[#15466f] disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         Send

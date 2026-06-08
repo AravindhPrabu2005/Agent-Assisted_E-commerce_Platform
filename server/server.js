@@ -14,6 +14,9 @@ const orderRoutes = require('./routes/orderRoutes');
 const reviewRoutes = require("./routes/reviewRoutes");
 const cartRoutes = require("./routes/cartRoutes");
 const wishlistRoutes = require("./routes/wishlistRoutes");
+const reviewSummaryRoutes = require("./routes/reviewSummaryRoutes");
+
+
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -30,6 +33,7 @@ app.use("/",orderRoutes);
 app.use("/", reviewRoutes);
 app.use("/", cartRoutes);
 app.use("/", wishlistRoutes);
+app.use("/", reviewSummaryRoutes);
 
 const initConnections = async () => {
   try {
