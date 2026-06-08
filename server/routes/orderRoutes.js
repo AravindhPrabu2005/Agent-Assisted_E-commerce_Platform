@@ -8,6 +8,87 @@ const CartItem = require("../models/CartItem");
 
 const round2 = (num) => Math.round(num * 100) / 100;
 
+const buildOrderDocument = (order) => {
+  const itemsText = (order.items || [])
+    .map(
+      (item) =>
+        `${item.name} ${item.brand || ""} SKU ${item.sku || ""} quantity ${item.quantity} unit price ${item.unitPrice} line total ${item.lineTotal}`
+    )
+    .join(". ");
+
+  return [
+    `Order ${order._id}`,
+    `Customer ${order.customer?.fullName || ""}`,
+    `Phone ${order.customer?.phone || ""}`,
+    `Email ${order.customer?.email || ""}`,
+    `Status ${order.orderStatus || ""}`,
+    `Payment ${order.payment?.status || ""} via ${order.payment?.method || ""}`,
+    `Transaction ${order.payment?.transactionRef || ""}`,
+    `Subtotal ${order.pricing?.subtotal || 0}`,
+    `GST ${order.pricing?.gstAmount || 0}`,
+    `Shipping ${order.pricing?.shippingCharge || 0}`,
+    `Total ${order.pricing?.totalAmount || 0}`,
+    `Address ${order.shippingAddress?.addressLine1 || ""} ${order.shippingAddress?.addressLine2 || ""} ${order.shippingAddress?.city || ""} ${order.shippingAddress?.state || ""} ${order.shippingAddress?.postalCode || ""} ${order.shippingAddress?.country || ""}`,
+    `Items ${itemsText}`,
+    `Created ${order.createdAt ? new Date(order.createdAt).toISOString() : ""}`,
+  ]
+    .join(". ")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+const buildOrderMetadata = (order) => ({
+  entityType: "order",
+  orderId: String(order._id),
+  userId: order.userId ? String(order.userId) : "",
+  orderStatus: order.orderStatus || "",
+  paymentStatus: order.payment?.status || "",
+  paymentMethod: order.payment?.method || "",
+  transactionRef: order.payment?.transactionRef || "",
+  customerName: order.customer?.fullName || "",
+  customerPhone: order.customer?.phone || "",
+  customerEmail: order.customer?.email || "",
+  city: order.shippingAddress?.city || "",
+  state: order.shippingAddress?.state || "",
+  postalCode: order.shippingAddress?.postalCode || "",
+  country: order.shippingAddress?.country || "",
+  itemCount: Array.isArray(order.items)
+    ? order.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0)
+    : 0,
+  subtotal: Number(order.pricing?.subtotal || 0),
+  gstAmount: Number(order.pricing?.gstAmount || 0),
+  shippingCharge: Number(order.pricing?.shippingCharge || 0),
+  totalAmount: Number(order.pricing?.totalAmount || 0),
+  createdAt: order.createdAt
+    ? new Date(order.createdAt).toISOString()
+    : new Date().toISOString(),
+  updatedAt: order.updatedAt
+    ? new Date(order.updatedAt).toISOString()
+    : new Date().toISOString(),
+});
+
+const upsertOrderInChroma = async (req, order) => {
+  const chromaClient = req.app.locals.chromaClient;
+  const embeddingFunction = req.app.locals.embeddingFunction;
+
+  if (!chromaClient || !embeddingFunction) return;
+
+  const collection =
+    req.app.locals.ordersCollection ||
+    (await chromaClient.getOrCreateCollection({
+      name: "orders",
+      embeddingFunction,
+    }));
+
+  req.app.locals.ordersCollection = collection;
+
+  await collection.upsert({
+    ids: [String(order._id)],
+    documents: [buildOrderDocument(order)],
+    metadatas: [buildOrderMetadata(order)],
+  });
+};
+
 router.post("/orders", async (req, res) => {
   const session = await mongoose.startSession();
 
@@ -141,6 +222,10 @@ router.post("/orders", async (req, res) => {
 
       createdOrder = order;
     });
+
+    if (createdOrder) {
+      await upsertOrderInChroma(req, createdOrder);
+    }
 
     return res.status(201).json({
       message: "Order placed successfully.",

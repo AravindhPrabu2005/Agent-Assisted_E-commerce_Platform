@@ -128,8 +128,12 @@ const Order = () => {
 
       const payload = {
         userId: userId || null,
-        productId: product._id,
-        quantity,
+        items: [
+          {
+            productId: product._id,
+            quantity,
+          },
+        ],
         customer: {
           fullName: form.fullName.trim(),
           email: form.email.trim(),
@@ -215,7 +219,7 @@ const Order = () => {
             </div>
 
             <h1 className="mt-6 text-3xl font-black text-[#0e3558]">
-              Payment successfull
+              Payment successful
             </h1>
 
             <p className="mt-3 text-sm leading-7 text-slate-500">

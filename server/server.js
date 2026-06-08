@@ -8,14 +8,14 @@ require("dotenv").config();
 const authRoutes = require("./routes/authRoutes");
 const productRoutes = require("./routes/productRoutes");
 const inventoryRoutes = require("./routes/inventoryRoutes");
-const chatbotRoutes = require('./routes/chatbotRoutes');
-const conversationRoutes = require('./routes/conversationRoutes');
-const orderRoutes = require('./routes/orderRoutes');
+const chatbotRoutes = require("./routes/chatbotRoutes");
+const conversationRoutes = require("./routes/conversationRoutes");
+const orderRoutes = require("./routes/orderRoutes");
 const reviewRoutes = require("./routes/reviewRoutes");
 const cartRoutes = require("./routes/cartRoutes");
 const wishlistRoutes = require("./routes/wishlistRoutes");
 const reviewSummaryRoutes = require("./routes/reviewSummaryRoutes");
-
+const recommendationRoutes = require("./routes/recommendationRoutes");
 
 
 const app = express();
@@ -27,13 +27,14 @@ app.use(express.json());
 app.use("/", authRoutes);
 app.use("/", productRoutes);
 app.use("/", inventoryRoutes);
-app.use("/",chatbotRoutes);
-app.use("/",conversationRoutes);
-app.use("/",orderRoutes);
+app.use("/", chatbotRoutes);
+app.use("/", conversationRoutes);
+app.use("/", orderRoutes);
 app.use("/", reviewRoutes);
 app.use("/", cartRoutes);
 app.use("/", wishlistRoutes);
 app.use("/", reviewSummaryRoutes);
+app.use("/", recommendationRoutes);
 
 const initConnections = async () => {
   try {
@@ -50,6 +51,25 @@ const initConnections = async () => {
 
     app.locals.chromaClient = chromaClient;
     app.locals.embeddingFunction = embeddingFunction;
+
+    const productsCollection = await chromaClient.getOrCreateCollection({
+      name: "products",
+      embeddingFunction,
+    });
+
+    const reviewsCollection = await chromaClient.getOrCreateCollection({
+      name: "reviews",
+      embeddingFunction,
+    });
+
+    const ordersCollection = await chromaClient.getOrCreateCollection({
+      name: "orders",
+      embeddingFunction,
+    });
+
+    app.locals.productsCollection = productsCollection;
+    app.locals.reviewsCollection = reviewsCollection;
+    app.locals.ordersCollection = ordersCollection;
 
     console.log("ChromaDB connected");
 
