@@ -134,6 +134,24 @@ const ProductWorkspace = () => {
       const res = await axiosInstance.put(`/products/${productId}`, payload);
       const updatedProduct = res.data?.product || res.data;
       setProduct(updatedProduct);
+      setFormData({
+        name: updatedProduct.name || "",
+        description: updatedProduct.description || "",
+        shortDescription: updatedProduct.shortDescription || "",
+        brand: updatedProduct.brand || "",
+        category: updatedProduct.category || "",
+        subCategory: updatedProduct.subCategory || "",
+        imageUrl: updatedProduct.imageUrl || "",
+        price: updatedProduct.price ?? "",
+        discountPrice: updatedProduct.discountPrice ?? "",
+        currency: updatedProduct.currency || "INR",
+        sku: updatedProduct.sku || "",
+        availabilityCount: updatedProduct.availabilityCount ?? "",
+        minimumThresholdCount: updatedProduct.minimumThresholdCount ?? "",
+        tags: Array.isArray(updatedProduct.tags) ? updatedProduct.tags.join(", ") : "",
+        isFeatured: Boolean(updatedProduct.isFeatured),
+        status: updatedProduct.status || "draft",
+      });
     } catch (err) {
       setError(err.response?.data?.error || "Failed to save product changes.");
     } finally {
@@ -161,12 +179,16 @@ const ProductWorkspace = () => {
   const totalReviews = reviews.length;
   const averageRating =
     totalReviews > 0
-      ? (reviews.reduce((sum, review) => sum + Number(review.rating || 0), 0) / totalReviews).toFixed(1)
+      ? (
+          reviews.reduce((sum, review) => sum + Number(review.rating || 0), 0) /
+          totalReviews
+        ).toFixed(1)
       : "0.0";
 
   const inStock = Number(product?.availabilityCount || 0) > 0;
   const lowStock =
-    Number(product?.availabilityCount || 0) <= Number(product?.minimumThresholdCount || 0);
+    Number(product?.availabilityCount || 0) <=
+    Number(product?.minimumThresholdCount || 0);
 
   if (loading) {
     return (
@@ -500,7 +522,7 @@ const ProductWorkspace = () => {
                 />
               </div>
 
-              <div>
+              <div className="md:col-span-2">
                 <label className="mb-2 block text-sm font-semibold text-slate-700">
                   Image URL
                 </label>
@@ -512,6 +534,28 @@ const ProductWorkspace = () => {
                   required
                   className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100"
                 />
+              </div>
+
+              <div className="md:col-span-2">
+                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                    Updated Image Preview
+                  </p>
+                  <div className="flex h-[260px] items-center justify-center overflow-hidden rounded-[20px] bg-white">
+                    <img
+                      src={
+                        formData.imageUrl ||
+                        "https://dummyimage.com/700x700/e5e7eb/111827&text=No+Image"
+                      }
+                      alt={formData.name || product.name}
+                      className="h-full w-full object-contain"
+                      onError={(e) => {
+                        e.currentTarget.src =
+                          "https://dummyimage.com/700x700/e5e7eb/111827&text=No+Image";
+                      }}
+                    />
+                  </div>
+                </div>
               </div>
 
               <div>
