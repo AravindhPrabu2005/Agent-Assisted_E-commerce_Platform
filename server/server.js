@@ -16,6 +16,7 @@ const cartRoutes = require("./routes/cartRoutes");
 const wishlistRoutes = require("./routes/wishlistRoutes");
 const reviewSummaryRoutes = require("./routes/reviewSummaryRoutes");
 const recommendationRoutes = require("./routes/recommendationRoutes");
+const inventoryAgentRoutes = require("./routes/inventoryAgentRoutes");
 
 
 const app = express();
@@ -35,6 +36,7 @@ app.use("/", cartRoutes);
 app.use("/", wishlistRoutes);
 app.use("/", reviewSummaryRoutes);
 app.use("/", recommendationRoutes);
+app.use("/", inventoryAgentRoutes);
 
 const initConnections = async () => {
   try {

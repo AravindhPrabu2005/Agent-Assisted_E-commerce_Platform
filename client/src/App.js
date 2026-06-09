@@ -19,6 +19,7 @@ import Cart from "./components/user/Cart";
 import Wishlist from "./components/user/Wishlist";
 import CartCheckout from "./components/user/CartCheckout";
 import ProductWorkspace from "./components/admin/ProductWorkspace";
+import InventoryForecast from "./components/admin/InventoryForecast";
 
 const App = () => {
   return (
@@ -31,7 +32,7 @@ const App = () => {
 
         <Route path="/user/home" element={<Home />} />
         <Route path="/user/product/:id" element={<Product />} />
-        <Route path='/user/product-finder' element={<ChatBot /> } />
+        <Route path="/user/product-finder" element={<ChatBot />} />
         <Route path="/user/order/:id" element={<Order />} />
         <Route path="/user/orders" element={<OrdersListing />} />
         <Route path="/user/cart" element={<Cart />} />
@@ -39,11 +40,12 @@ const App = () => {
         <Route path="/user/cart-checkout" element={<CartCheckout />} />
 
         <Route path="/admin/dashboard" element={<Dashboard />} />
-        <Route path="/admin/products" element={<Products /> } />
+        <Route path="/admin/products" element={<Products />} />
         <Route path="/admin/products/:productId" element={<ProductWorkspace />} />
         <Route path="/admin/newproduct" element={<NewProduct />} />
         <Route path="/admin/orders" element={<Orders />} />
         <Route path="/admin/inventory" element={<Inventory />} />
+        <Route path="/admin/inventory-forecast" element={<InventoryForecast />} />
         <Route path="/admin/analytics" element={<Analytics />} />
       </Routes>
     </Router>

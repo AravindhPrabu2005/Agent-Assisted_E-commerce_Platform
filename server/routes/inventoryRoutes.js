@@ -1,153 +1,334 @@
 const express = require("express");
-const Product = require("../models/Product");
-
+const mongoose = require("mongoose");
 const router = express.Router();
 
-const generateProductDocument = (product) => {
-  return `
-    Product Name: ${product.name}
-    Description: ${product.description}
-    Short Description: ${product.shortDescription || ""}
-    Brand: ${product.brand || ""}
-    Category: ${product.category}
-    Subcategory: ${product.subCategory || ""}
-    Tags: ${(product.tags || []).join(", ")}
-    Price: ${product.price}
-    Discount Price: ${product.discountPrice || 0}
-    Currency: ${product.currency || "INR"}
-    SKU: ${product.sku || ""}
-    Status: ${product.status}
-    Availability Count: ${product.availabilityCount}
-    Minimum Threshold Count: ${product.minimumThresholdCount}
-    Order Count: ${product.orderCount || 0}
-  `.trim();
+const Order = require("../models/Order");
+const Product = require("../models/Product");
+const CartItem = require("../models/CartItem");
+
+const round2 = (num) => Math.round(num * 100) / 100;
+
+const buildOrderDocument = (order) => {
+  const itemsText = (order.items || [])
+    .map(
+      (item) =>
+        `${item.name} ${item.brand || ""} SKU ${item.sku || ""} quantity ${
+          item.quantity
+        } unit price ${item.unitPrice} line total ${item.lineTotal}`
+    )
+    .join(". ");
+
+  return [
+    `Order ${order._id}`,
+    `Customer ${order.customer?.fullName || ""}`,
+    `Phone ${order.customer?.phone || ""}`,
+    `Email ${order.customer?.email || ""}`,
+    `Status ${order.orderStatus || ""}`,
+    `Payment ${order.payment?.status || ""} via ${order.payment?.method || ""}`,
+    `Transaction ${order.payment?.transactionRef || ""}`,
+    `Subtotal ${order.pricing?.subtotal || 0}`,
+    `GST ${order.pricing?.gstAmount || 0}`,
+    `Shipping ${order.pricing?.shippingCharge || 0}`,
+    `Total ${order.pricing?.totalAmount || 0}`,
+    `Address ${order.shippingAddress?.addressLine1 || ""} ${
+      order.shippingAddress?.addressLine2 || ""
+    } ${order.shippingAddress?.city || ""} ${order.shippingAddress?.state || ""} ${
+      order.shippingAddress?.postalCode || ""
+    } ${order.shippingAddress?.country || ""}`,
+    `Items ${itemsText}`,
+    `Created ${order.createdAt ? new Date(order.createdAt).toISOString() : ""}`,
+  ]
+    .join(". ")
+    .replace(/\s+/g, " ")
+    .trim();
 };
 
-router.get("/inventory", async (req, res) => {
+const buildOrderMetadata = (order) => {
+  const items = Array.isArray(order.items) ? order.items : [];
+
+  return {
+    entityType: "order",
+    orderId: String(order._id),
+    userId: order.userId ? String(order.userId) : "",
+    orderStatus: order.orderStatus || "",
+    paymentStatus: order.payment?.status || "",
+    paymentMethod: order.payment?.method || "",
+    transactionRef: order.payment?.transactionRef || "",
+    customerName: order.customer?.fullName || "",
+    customerPhone: order.customer?.phone || "",
+    customerEmail: order.customer?.email || "",
+    city: order.shippingAddress?.city || "",
+    state: order.shippingAddress?.state || "",
+    postalCode: order.shippingAddress?.postalCode || "",
+    country: order.shippingAddress?.country || "",
+    itemCount: items.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
+    subtotal: Number(order.pricing?.subtotal || 0),
+    gstAmount: Number(order.pricing?.gstAmount || 0),
+    shippingCharge: Number(order.pricing?.shippingCharge || 0),
+    totalAmount: Number(order.pricing?.totalAmount || 0),
+    createdAt: order.createdAt
+      ? new Date(order.createdAt).toISOString()
+      : new Date().toISOString(),
+    updatedAt: order.updatedAt
+      ? new Date(order.updatedAt).toISOString()
+      : new Date().toISOString(),
+    productIds: items.map((item) => String(item.productId)),
+    productNames: items.map((item) => item.name || ""),
+    productBrands: items.map((item) => item.brand || ""),
+    productSkus: items.map((item) => item.sku || ""),
+    productQuantities: items.map((item) => Number(item.quantity || 0)),
+    productUnitPrices: items.map((item) => Number(item.unitPrice || 0)),
+    productLineTotals: items.map((item) => Number(item.lineTotal || 0)),
+  };
+};
+
+const upsertOrderInChroma = async (req, order) => {
+  const chromaClient = req.app.locals.chromaClient;
+  const embeddingFunction = req.app.locals.embeddingFunction;
+
+  if (!chromaClient || !embeddingFunction) return;
+
+  const collection =
+    req.app.locals.ordersCollection ||
+    (await chromaClient.getOrCreateCollection({
+      name: "orders",
+      embeddingFunction,
+    }));
+
+  req.app.locals.ordersCollection = collection;
+
+  await collection.upsert({
+    ids: [String(order._id)],
+    documents: [buildOrderDocument(order)],
+    metadatas: [buildOrderMetadata(order)],
+  });
+};
+
+router.post("/orders", async (req, res) => {
+  const session = await mongoose.startSession();
+
   try {
-    const products = await Product.find().sort({ createdAt: -1 });
+    const { userId, items, customer, shippingAddress } = req.body;
 
-    return res.json({
-      success: true,
-      products,
-    });
-  } catch (error) {
-    console.error("Fetch inventory error:", error);
-    return res.status(500).json({ error: "Server error" });
-  }
-});
-
-router.put("/inventory/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { availabilityCount, minimumThresholdCount, orderCount, status } = req.body;
-
-    const product = await Product.findById(id);
-
-    if (!product) {
-      return res.status(404).json({ error: "Product not found" });
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({
+        message: "At least one item is required.",
+      });
     }
 
-    if (availabilityCount !== undefined) {
-      product.availabilityCount = Number(availabilityCount);
+    if (
+      !customer?.fullName ||
+      !customer?.phone ||
+      !shippingAddress?.addressLine1 ||
+      !shippingAddress?.city ||
+      !shippingAddress?.state ||
+      !shippingAddress?.postalCode
+    ) {
+      return res.status(400).json({
+        message: "Customer and shipping details are required.",
+      });
     }
 
-    if (minimumThresholdCount !== undefined) {
-      product.minimumThresholdCount = Number(minimumThresholdCount);
-    }
+    let createdOrder = null;
 
-    if (orderCount !== undefined) {
-      product.orderCount = Number(orderCount);
-    }
+    await session.withTransaction(async () => {
+      const orderItems = [];
+      let subtotal = 0;
 
-    if (status) {
-      product.status = status;
-    } else if (Number(product.availabilityCount) === 0) {
-      product.status = "out_of_stock";
-    } else if (product.status === "out_of_stock" && Number(product.availabilityCount) > 0) {
-      product.status = "published";
-    }
+      for (const entry of items) {
+        if (!entry?.productId || !entry?.quantity || Number(entry.quantity) < 1) {
+          throw new Error("Each order item must have valid product and quantity.");
+        }
 
-    const updatedProduct = await product.save();
+        const product = await Product.findById(entry.productId).session(session);
 
-    try {
-      const chromaClient = req.app.locals.chromaClient;
+        if (!product || !product.isActive) {
+          throw new Error("One or more products are not available.");
+        }
 
-      if (chromaClient) {
-        const productCollection = await chromaClient.getOrCreateCollection({
-          name: "products",
+        const qty = Number(entry.quantity);
+
+        if ((product.availabilityCount || 0) < qty) {
+          throw new Error(`Requested quantity not available for ${product.name}.`);
+        }
+
+        const unitPrice =
+          product.discountPrice && product.discountPrice > 0
+            ? product.discountPrice
+            : product.price;
+
+        const lineTotal = round2(unitPrice * qty);
+        subtotal += lineTotal;
+
+        orderItems.push({
+          productId: product._id,
+          name: product.name,
+          imageUrl: product.imageUrl,
+          brand: product.brand,
+          sku: product.sku,
+          unitPrice,
+          quantity: qty,
+          lineTotal,
         });
 
-        await productCollection.update({
-          ids: [updatedProduct._id.toString()],
-          documents: [generateProductDocument(updatedProduct)],
-          metadatas: [
-            {
-              productId: updatedProduct._id.toString(),
-              adminId: updatedProduct.adminId.toString(),
-              name: updatedProduct.name,
-              category: updatedProduct.category,
-              subCategory: updatedProduct.subCategory || "",
-              brand: updatedProduct.brand || "",
-              price: updatedProduct.price,
-              discountPrice: updatedProduct.discountPrice || 0,
-              availabilityCount: updatedProduct.availabilityCount,
-              minimumThresholdCount: updatedProduct.minimumThresholdCount,
-              orderCount: updatedProduct.orderCount || 0,
-              imageUrl: updatedProduct.imageUrl,
-              status: updatedProduct.status,
-              isFeatured: updatedProduct.isFeatured,
-            },
-          ],
-        });
+        product.availabilityCount -= qty;
+        product.orderCount = (product.orderCount || 0) + qty;
+
+        if (product.availabilityCount <= 0) {
+          product.availabilityCount = 0;
+          product.status = "out_of_stock";
+        } else {
+          product.status = "published";
+        }
+
+        await product.save({ session });
       }
-    } catch (chromaError) {
-      console.error("Chroma inventory update error:", chromaError);
+
+      subtotal = round2(subtotal);
+      const gstPercent = 18;
+      const gstAmount = round2((subtotal * gstPercent) / 100);
+      const shippingCharge = 0;
+      const totalAmount = round2(subtotal + gstAmount + shippingCharge);
+
+      const transactionRef = `SIM-${Date.now()}-${Math.floor(
+        1000 + Math.random() * 9000
+      )}`;
+
+      const [order] = await Order.create(
+        [
+          {
+            userId: userId || null,
+            items: orderItems,
+            pricing: {
+              subtotal,
+              gstPercent,
+              gstAmount,
+              shippingCharge,
+              totalAmount,
+            },
+            payment: {
+              method: "simulation",
+              status: "paid",
+              paidAt: new Date(),
+              transactionRef,
+            },
+            orderStatus: "placed",
+            customer: {
+              fullName: customer.fullName,
+              email: customer.email || "",
+              phone: customer.phone,
+            },
+            shippingAddress: {
+              addressLine1: shippingAddress.addressLine1,
+              addressLine2: shippingAddress.addressLine2 || "",
+              city: shippingAddress.city,
+              state: shippingAddress.state,
+              postalCode: shippingAddress.postalCode,
+              country: shippingAddress.country || "India",
+            },
+          },
+        ],
+        { session }
+      );
+
+      if (userId) {
+        await CartItem.deleteMany({ userId }).session(session);
+      }
+
+      createdOrder = order;
+    });
+
+    if (createdOrder) {
+      await upsertOrderInChroma(req, createdOrder);
     }
 
-    return res.json({
-      success: true,
-      message: "Inventory updated successfully",
-      product: updatedProduct,
+    return res.status(201).json({
+      message: "Order placed successfully.",
+      order: createdOrder,
     });
   } catch (error) {
-    console.error("Update inventory error:", error);
-    return res.status(500).json({ error: "Server error" });
+    return res.status(400).json({
+      message: error.message || "Failed to place order.",
+    });
+  } finally {
+    await session.endSession();
   }
 });
 
-router.get("/admin/inventory/:adminId", async (req, res) => {
+router.get("/orders", async (req, res) => {
+  try {
+    const { userId } = req.query;
+
+    const query = userId ? { userId } : {};
+    const orders = await Order.find(query)
+      .populate("items.productId")
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      orders,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Failed to fetch orders.",
+    });
+  }
+});
+
+router.get("/orders/:id", async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id).populate("items.productId");
+
+    if (!order) {
+      return res.status(404).json({
+        message: "Order not found.",
+      });
+    }
+
+    return res.status(200).json(order);
+  } catch (error) {
+    return res.status(500).json({
+      message: "Failed to fetch order.",
+    });
+  }
+});
+
+router.get("/admin/orders/:adminId", async (req, res) => {
   try {
     const { adminId } = req.params;
-    const products = await Product.find({ adminId }).sort({ createdAt: -1 });
-    res.json({ products });
+
+    const adminProducts = await Product.find({ adminId }).select("_id");
+    const productIds = adminProducts.map((product) => product._id.toString());
+
+    const orders = await Order.find({
+      "items.productId": { $in: productIds },
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const filteredOrders = orders.map((order) => {
+      const filteredItems = (order.items || []).filter((item) =>
+        productIds.includes(String(item.productId?._id || item.productId))
+      );
+
+      const recalculatedSubtotal = filteredItems.reduce(
+        (sum, item) => sum + Number(item.lineTotal || 0),
+        0
+      );
+
+      return {
+        ...order,
+        items: filteredItems,
+        pricing: {
+          ...order.pricing,
+          totalAmount: recalculatedSubtotal,
+        },
+      };
+    });
+
+    res.json({ orders: filteredOrders });
   } catch (error) {
-    res.status(500).json({ error: "Failed to fetch admin inventory." });
-  }
-});
-
-router.put("/admin/inventory/:productId", async (req, res) => {
-  try {
-    const { productId } = req.params;
-    const { adminId, availabilityCount, minimumThresholdCount, orderCount, status } =
-      req.body;
-
-    const product = await Product.findOne({ _id: productId, adminId });
-
-    if (!product) {
-      return res.status(404).json({ error: "Product not found for this admin." });
-    }
-
-    product.availabilityCount = Number(availabilityCount || 0);
-    product.minimumThresholdCount = Number(minimumThresholdCount || 0);
-    product.orderCount = Number(orderCount || 0);
-    product.status = status;
-
-    await product.save();
-
-    res.json({ product });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to update inventory." });
+    console.error("Admin orders fetch failed:", error);
+    res.status(500).json({ error: "Failed to fetch admin orders." });
   }
 });
 

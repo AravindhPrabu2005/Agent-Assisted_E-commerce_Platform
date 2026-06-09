@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import axiosInstance from "../../axiosInstance";
 import AdminNavbar from "./AdminNavbar";
 
 const Inventory = () => {
+  const navigate = useNavigate();
   const adminId =
     localStorage.getItem("userId") || localStorage.getItem("adminId") || "";
 
@@ -64,7 +66,7 @@ const Inventory = () => {
         status:
           Number(product.availabilityCount || 0) === 0
             ? "out_of_stock"
-            : product.status || "in_stock",
+            : product.status || "published",
       };
 
       const response = await axiosInstance.put(
@@ -131,12 +133,21 @@ const Inventory = () => {
               </p>
             </div>
 
-            <button
-              onClick={fetchProducts}
-              className="rounded-2xl bg-[#0e3558] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#164a79]"
-            >
-              Refresh Inventory
-            </button>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <button
+                onClick={() => navigate("/admin/inventory-forecast")}
+                className="rounded-2xl bg-gradient-to-r from-[#0e3558] to-[#1b5b92] px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-200 transition hover:scale-[1.02] hover:from-[#164a79] hover:to-[#256ca9]"
+              >
+                Forecast Center
+              </button>
+
+              <button
+                onClick={fetchProducts}
+                className="rounded-2xl bg-[#0e3558] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#164a79]"
+              >
+                Refresh Inventory
+              </button>
+            </div>
           </div>
 
           {loading ? (
